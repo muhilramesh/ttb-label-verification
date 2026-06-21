@@ -1,10 +1,58 @@
 # TTB Label Verification
 
-Phase 0 scaffold for the TTB Label Verification proof of concept.
+Proof-of-concept web app for checking alcohol label images against submitted application data. The app extracts visible label text with a vision model, compares each extracted field with deterministic rules, and returns a clear `APPROVED` or `NEEDS REVIEW` result.
 
-The current app is intentionally minimal: FastAPI serves a `/health` endpoint and a static frontend page that calls it.
+## Live Demo
 
-## Local Setup
+Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
+
+Repository: https://github.com/muhil-ramesh/muhil-ramesh-ttb-label-verification
+
+## What This Does
+
+- Accepts a label image plus seven application fields.
+- Extracts label text into structured JSON.
+- Compares every field and shows per-field `PASS` or `FAIL`.
+- Shows expected-vs-found values on failures.
+- Surfaces the extracted government warning text for review.
+- Supports batch checking with per-label results and summary counts.
+- Returns readable errors for bad input, timeouts, provider limits, and missing configuration.
+
+## Demo Checklist
+
+- Single-label check: upload one image, fill the seven fields, and click `Check Label`.
+- Batch check: open `Batch Labels`, add label images one at a time or all together, fill each row, and click `Check All Labels`.
+- Exact-warning behavior: capitalization, wording, and punctuation are strict; line-break layout is normalized because label OCR often wraps warning text.
+- Error behavior: submit without an image or with a wrong file type to see a plain-English 4xx response.
+
+## Tech Stack
+
+- Python 3.12
+- FastAPI
+- Pydantic
+- Plain HTML, CSS, and JavaScript
+- Gemini vision model through the Gemini API
+- Railway deployment
+- Pytest test suite
+
+## Environment Variables
+
+Real secrets must live in local environment variables or Railway service variables. Do not commit `.env`.
+
+```bash
+APP_ENV=local
+GEMINI_API_KEY=
+GEMINI_VISION_MODEL=gemini-3.1-flash-lite
+GEMINI_TIMEOUT_SECONDS=7.5
+GEMINI_THINKING_LEVEL=minimal
+IMAGE_MAX_LONG_SIDE=1024
+IMAGE_JPEG_QUALITY=80
+BATCH_CONCURRENCY=3
+```
+
+`GEMINI_API_KEY` is required for real vision extraction. `.env.example` lists the variable names only.
+
+## Run Locally
 
 Install dependencies with Python 3.12:
 
@@ -12,17 +60,19 @@ Install dependencies with Python 3.12:
 uv sync --python python3.12
 ```
 
-Run tests:
+Run the app:
 
 ```bash
-uv run pytest
-```
-
-Run the app locally:
-
-```bash
+export GEMINI_VISION_MODEL=gemini-3.1-flash-lite
+export GEMINI_THINKING_LEVEL=minimal
+export GEMINI_TIMEOUT_SECONDS=7.5
+export IMAGE_MAX_LONG_SIDE=1024
+export IMAGE_JPEG_QUALITY=80
+export BATCH_CONCURRENCY=3
 uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+Set `GEMINI_API_KEY` in your shell or local `.env` before running. Do not commit that value.
 
 Open:
 
@@ -30,75 +80,92 @@ Open:
 http://127.0.0.1:8000
 ```
 
-Check the health endpoint directly:
+Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-## Railway Deploy
-
-Install and authenticate the Railway CLI:
+## Run Tests
 
 ```bash
-brew install railway
-railway login
+uv run pytest
+node --check frontend/app.js
 ```
 
-Create and link a Railway project:
+The current test suite covers the comparison engine, vision service parsing and error mapping, single-label endpoint, batch endpoint, frontend static behavior, and health route.
+
+## API Examples
+
+Create the local sample image if needed:
 
 ```bash
-railway init --name ttb-label-verification
+uv run python scripts/run_vision_sample.py --create-sample-only
 ```
 
-Create and link an empty service for this app:
+Single-label request:
 
 ```bash
-railway add --service ttb-label-verification
+curl -sS -X POST http://127.0.0.1:8000/verify \
+  -F "image=@samples/sample_label.jpg;type=image/jpeg" \
+  -F 'application_data={"brand_name":"SUNSET RIDGE","product_class":"CABERNET SAUVIGNON","producer_name":"North Valley Estate Winery LLC","country_of_origin":"USA","abv":"45%","net_contents":"750 mL","government_warning":"GOVERNMENT WARNING: EXACTLY AS PRINTED"}'
 ```
 
-Set environment variables in Railway, not in the repo:
+Batch requests use `images`, `image_ids`, and `application_data`. Each `image_ids` value maps an uploaded image to one application-data row.
 
-```bash
-railway variable set APP_ENV=production
-```
+## Approach
 
-Confirm no local secret files are tracked:
+The backend is stateless. It receives uploaded image bytes and application data, validates the request, asks the vision service for a structured `ExtractedLabel`, compares the extracted label against the submitted application data, and returns a `VerificationResult`.
 
-```bash
-git ls-files .env .env.local .env.production
-```
+The vision service:
 
-That command should print nothing.
+- downscales and re-encodes images before the model call;
+- uses Gemini structured JSON output instead of ad hoc string parsing;
+- returns partial data when fields are unreadable;
+- maps timeouts, rate limits, malformed output, and missing configuration into readable API errors.
 
-Deploy from the repo root:
+The comparison engine is pure Python over typed Pydantic models, so it is unit-testable without model calls.
 
-```bash
-railway up
-```
+## Comparison Rules
 
-Generate a Railway-provided public URL:
+- Brand name, product type, and producer name: fuzzy token-sort matching with threshold `90`.
+- Country of origin: normalized country synonyms, including `USA` and `United States`.
+- Alcohol content: numeric ABV normalization, so `45%` can match `45% Alc./Vol. (90 Proof)`.
+- Net contents: unit normalization, so `750 mL` can match `750ml`.
+- Government warning: strict wording, capitalization, and punctuation; whitespace layout is normalized to avoid false failures from OCR line wrapping.
 
-```bash
-railway domain
-```
+Any field failure makes the overall verdict `NEEDS_REVIEW`.
 
-Verify the deployed app:
+## Batch Processing
 
-```bash
-curl https://YOUR-RAILWAY-DOMAIN.up.railway.app/health
-```
+Batch mode processes labels concurrently with a bounded concurrency limit. One bad label does not fail the whole batch; each item returns either a result or an item-level error. The summary reports approved, needs-review, error, and total counts.
 
-Then open the domain in a browser and confirm the page shows the health response.
+## Security
 
-## Secrets
+- API keys are read from environment variables only.
+- `.env` and `.env.*` files are ignored by Git.
+- `.env.example` contains placeholders only.
+- The production key is configured in Railway, not in the repository.
+- Error responses do not expose stack traces.
 
-Use `.env.example` for variable names only. Real secrets must live in local `.env` files or host-managed environment variables.
+## Performance Notes
 
-Before committing, confirm no secret file is tracked:
+The original goal was a strict under-5-second single-label check. Live Gemini testing showed provider latency variance, so the proof-of-concept now uses a practical backend timeout of `7.5` seconds and a frontend timeout of `9` seconds. Fast successful checks can complete around 3 to 4 seconds, but provider latency and free-tier quota limits can vary.
 
-```bash
-git ls-files .env .env.local .env.production
-```
+Batch mode can take longer because several labels are processed together. Concurrency is bounded with `BATCH_CONCURRENCY`.
 
-That command should print nothing.
+## Assumptions
+
+- One image represents one label record.
+- The app is stateless and does not store uploaded images or results.
+- Application data is supplied as seven required fields.
+- Reviewers will use a configured `GEMINI_API_KEY` for real extraction.
+- Railway provides production environment variables.
+
+## Limitations
+
+- Vision/OCR can misread small or blurry warning text.
+- Free-tier Gemini quota or rate limits can temporarily block live testing.
+- The app does not persist history or support user accounts.
+- The app does not currently support multiple images for one label because that slowed model calls during testing.
+- This is a proof of concept, not a full TTB production workflow.
