@@ -63,6 +63,33 @@ def test_frontend_batch_request_has_summary_drilldown_and_progress() -> None:
     assert 'aria-label="Checking labels"' in response.text
 
 
+def test_frontend_uses_spec_response_field_names() -> None:
+    response = client.get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "data.overall_verdict" in response.text
+    assert "data.results" in response.text
+    assert "data.summary" in response.text
+    assert "result.found" in response.text
+    assert "data.verdict" not in response.text
+    assert "data.fields" not in response.text
+    assert "result.actual" not in response.text
+
+
+def test_frontend_uses_spec_application_field_names() -> None:
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+
+    assert 'name="class_type"' in html
+    assert 'name="producer"' in html
+    assert 'name="product_class"' not in html
+    assert 'name="producer_name"' not in html
+    assert '"class_type"' in js
+    assert '"producer"' in js
+    assert '"product_class"' not in js
+    assert '"producer_name"' not in js
+
+
 def test_frontend_accessibility_hooks_are_present() -> None:
     html = client.get("/").text
     css = client.get("/static/styles.css").text

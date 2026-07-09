@@ -24,8 +24,8 @@ WARNING = "GOVERNMENT WARNING: EXACTLY AS PRINTED"
 def application_payload(**overrides) -> dict:
     payload = {
         "brand_name": "Sunset Ridge",
-        "product_class": "Cabernet Sauvignon",
-        "producer_name": "North Valley Estate Winery LLC",
+        "class_type": "Cabernet Sauvignon",
+        "producer": "North Valley Estate Winery LLC",
         "country_of_origin": "USA",
         "abv": "45%",
         "net_contents": "750 mL",
@@ -38,12 +38,14 @@ def application_payload(**overrides) -> dict:
 def extracted_label(**overrides) -> ExtractedLabel:
     payload = {
         "brand_name": "SUNSET RIDGE",
-        "product_class": "Sauvignon Cabernet",
-        "producer_name": "North Valley Estate Winery, LLC",
+        "class_type": "Sauvignon Cabernet",
+        "producer": "North Valley Estate Winery, LLC",
         "country_of_origin": "USA",
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750ml",
         "government_warning": WARNING,
+        "raw_text": "SUNSET RIDGE\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
+        "extraction_confidence": 0.97,
     }
     payload.update(overrides)
     return ExtractedLabel(**payload)
@@ -92,12 +94,21 @@ def test_verify_returns_pass_result_with_latency(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] == VerificationVerdict.PASS
+    assert body["overall_verdict"] == VerificationVerdict.APPROVED
     assert isinstance(body["latency_ms"], int)
     assert body["latency_ms"] >= 0
+    assert "verdict" not in body
+    assert "fields" not in body
     assert body["extracted_label"]["government_warning"] == WARNING
-    assert len(body["fields"]) == 7
-    assert all(field["status"] == "PASS" for field in body["fields"])
+    assert body["extracted_label"]["raw_text"].startswith("SUNSET RIDGE")
+    assert body["extracted_label"]["extraction_confidence"] == 0.97
+    assert len(body["results"]) == 7
+    assert all(field["status"] == "PASS" for field in body["results"])
+    assert all("found" in field for field in body["results"])
+    assert all("match_type" in field for field in body["results"])
+    assert all("actual" not in field for field in body["results"])
+    assert all("strategy" not in field for field in body["results"])
+    assert all("score" not in field for field in body["results"])
     assert len(fake_service.calls) == 1
 
 
@@ -110,7 +121,7 @@ def test_verify_success_logs_verdict_and_latency(
     response = post_verify(client)
 
     assert response.status_code == 200
-    assert "verify completed verdict=VerificationVerdict.PASS latency_ms=" in caplog.text
+    assert "verify completed verdict=VerificationVerdict.APPROVED latency_ms=" in caplog.text
 
 
 def test_verify_returns_needs_review_and_surfaces_warning_text(
@@ -124,16 +135,16 @@ def test_verify_returns_needs_review_and_surfaces_warning_text(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] == VerificationVerdict.NEEDS_REVIEW
+    assert body["overall_verdict"] == VerificationVerdict.NEEDS_REVIEW
     assert body["extracted_label"]["government_warning"] == misread_warning
 
     warning_result = next(
-        field for field in body["fields"] if field["field"] == "government_warning"
+        field for field in body["results"] if field["field"] == "government_warning"
     )
     assert warning_result["status"] == "FAIL"
     assert warning_result["expected"] == WARNING
-    assert warning_result["actual"] == misread_warning
-    assert warning_result["strategy"] == "exact_case_sensitive_whitespace_normalized"
+    assert warning_result["found"] == misread_warning
+    assert warning_result["match_type"] == "exact_case_sensitive_whitespace_normalized"
 
 
 def test_verify_accepts_warning_with_label_line_breaks(
@@ -147,12 +158,12 @@ def test_verify_accepts_warning_with_label_line_breaks(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] == VerificationVerdict.PASS
+    assert body["overall_verdict"] == VerificationVerdict.APPROVED
     warning_result = next(
-        field for field in body["fields"] if field["field"] == "government_warning"
+        field for field in body["results"] if field["field"] == "government_warning"
     )
     assert warning_result["status"] == "PASS"
-    assert warning_result["actual"] == wrapped_warning
+    assert warning_result["found"] == wrapped_warning
 
 
 def test_verify_passes_image_bytes_and_content_type_to_vision_service(

@@ -9,12 +9,12 @@ class FieldStatus(str, Enum):
 
 
 class VerificationVerdict(str, Enum):
-    PASS = "PASS"
+    APPROVED = "APPROVED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
 
 
 class BatchItemStatus(str, Enum):
-    PASS = "PASS"
+    APPROVED = "APPROVED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     ERROR = "ERROR"
 
@@ -23,8 +23,8 @@ class ApplicationData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brand_name: str
-    product_class: str
-    producer_name: str
+    class_type: str
+    producer: str
     country_of_origin: str
     abv: str | float
     net_contents: str
@@ -35,31 +35,31 @@ class ExtractedLabel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brand_name: str | None = None
-    product_class: str | None = None
-    producer_name: str | None = None
+    class_type: str | None = None
+    producer: str | None = None
     country_of_origin: str | None = None
     abv: str | float | None = None
     net_contents: str | None = None
     government_warning: str | None = None
+    raw_text: str | None = None
+    extraction_confidence: float | None = None
 
 
 class FieldResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field: str
-    status: FieldStatus
+    match_type: str
     expected: str
-    actual: str | None
-    strategy: str
-    score: float | None = None
-    message: str
+    found: str | None
+    status: FieldStatus
 
 
 class VerificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    verdict: VerificationVerdict
-    fields: list[FieldResult]
+    overall_verdict: VerificationVerdict
+    results: list[FieldResult]
     extracted_label: ExtractedLabel | None = None
     latency_ms: int | None = None
 
@@ -82,12 +82,18 @@ class BatchItemResult(BaseModel):
     latency_ms: int
 
 
+class BatchSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    passed: int
+    needs_review: int
+    total: int
+    errors: int = 0
+    latency_ms: int | None = None
+
+
 class BatchVerificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    total: int
-    passed: int
-    needs_review: int
-    errors: int
-    latency_ms: int
     items: list[BatchItemResult]
+    summary: BatchSummary

@@ -53,19 +53,15 @@ def _field_result(
     field: str,
     status: FieldStatus,
     expected: str | float,
-    actual: str | float | None,
-    strategy: str,
-    score: float | None,
-    message: str,
+    found: str | float | None,
+    match_type: str,
 ) -> FieldResult:
     return FieldResult(
         field=field,
+        match_type=match_type,
         status=status,
         expected=str(expected),
-        actual=_stringify(actual),
-        strategy=strategy,
-        score=score,
-        message=message,
+        found=_stringify(found),
     )
 
 
@@ -73,23 +69,21 @@ def _missing_actual_result(
     *,
     field: str,
     expected: str | float,
-    strategy: str,
+    match_type: str,
 ) -> FieldResult:
     return _field_result(
         field=field,
         status=FieldStatus.FAIL,
         expected=expected,
-        actual=None,
-        strategy=strategy,
-        score=None,
-        message="Extracted value is missing.",
+        found=None,
+        match_type=match_type,
     )
 
 
 def _compare_fuzzy(field: str, expected: str, actual: str | None) -> FieldResult:
-    strategy = f"fuzzy_token_sort_ratio>={FUZZY_THRESHOLD:.0f}"
+    match_type = f"fuzzy_token_sort_ratio>={FUZZY_THRESHOLD:.0f}"
     if actual is None:
-        return _missing_actual_result(field=field, expected=expected, strategy=strategy)
+        return _missing_actual_result(field=field, expected=expected, match_type=match_type)
 
     normalized_expected = _normalize_text(expected)
     normalized_actual = _normalize_text(actual)
@@ -100,14 +94,8 @@ def _compare_fuzzy(field: str, expected: str, actual: str | None) -> FieldResult
         field=field,
         status=status,
         expected=expected,
-        actual=actual,
-        strategy=strategy,
-        score=score,
-        message=(
-            "Fuzzy normalized values matched."
-            if status == FieldStatus.PASS
-            else "Fuzzy normalized values did not meet the threshold."
-        ),
+        found=actual,
+        match_type=match_type,
     )
 
 
@@ -115,15 +103,16 @@ def compare_brand_name(expected: str, actual: str | None) -> FieldResult:
     return _compare_fuzzy("brand_name", expected, actual)
 
 
-def compare_product_class(expected: str, actual: str | None) -> FieldResult:
-    return _compare_fuzzy("product_class", expected, actual)
+def compare_class_type(expected: str, actual: str | None) -> FieldResult:
+    return _compare_fuzzy("class_type", expected, actual)
 
 
-def compare_producer_name(expected: str, actual: str | None) -> FieldResult:
-    return _compare_fuzzy("producer_name", expected, actual)
+def compare_producer(expected: str, actual: str | None) -> FieldResult:
+    return _compare_fuzzy("producer", expected, actual)
 
 
 _COUNTRY_SYNONYMS = {
+    "america": "united states",
     "usa": "united states",
     "u s a": "united states",
     "us": "united states",
@@ -134,13 +123,56 @@ _COUNTRY_SYNONYMS = {
     "u k": "united kingdom",
     "united kingdom": "united kingdom",
     "great britain": "united kingdom",
+    "england": "united kingdom",
+    "scotland": "united kingdom",
+    "wales": "united kingdom",
+    "france": "france",
+    "french republic": "france",
+    "italy": "italy",
+    "italia": "italy",
+    "italian republic": "italy",
+    "spain": "spain",
+    "espana": "spain",
+    "españa": "spain",
+    "kingdom of spain": "spain",
+    "germany": "germany",
+    "deutschland": "germany",
+    "federal republic of germany": "germany",
+    "portugal": "portugal",
+    "portuguese republic": "portugal",
+    "australia": "australia",
+    "commonwealth of australia": "australia",
+    "argentina": "argentina",
+    "argentine republic": "argentina",
+    "republica argentina": "argentina",
+    "republic of argentina": "argentina",
+    "austria": "austria",
+    "republic of austria": "austria",
+    "canada": "canada",
+    "chile": "chile",
+    "republic of chile": "chile",
+    "greece": "greece",
+    "hellenic republic": "greece",
+    "ireland": "ireland",
+    "japan": "japan",
+    "mexico": "mexico",
+    "méxico": "mexico",
+    "united mexican states": "mexico",
+    "new zealand": "new zealand",
+    "nz": "new zealand",
+    "south africa": "south africa",
+    "republic of south africa": "south africa",
+    "netherlands": "netherlands",
+    "the netherlands": "netherlands",
+    "holland": "netherlands",
 }
 
 
 def _canonical_country(value: str) -> str:
     normalized = _normalize_text(value)
     normalized = re.sub(
-        r"^(?:product\s+of|produced\s+in|made\s+in|country\s+of\s+origin)\s+",
+        r"^(?:product\s+of|produced\s+in|made\s+in|country\s+of\s+origin|"
+        r"imported\s+from|wine\s+of|origin)\s+",
         "",
         normalized,
     )
@@ -148,12 +180,12 @@ def _canonical_country(value: str) -> str:
 
 
 def compare_country(expected: str, actual: str | None) -> FieldResult:
-    strategy = "country_synonym_exact"
+    match_type = "country_synonym_exact"
     if actual is None:
         return _missing_actual_result(
             field="country_of_origin",
             expected=expected,
-            strategy=strategy,
+            match_type=match_type,
         )
 
     expected_country = _canonical_country(expected)
@@ -168,14 +200,8 @@ def compare_country(expected: str, actual: str | None) -> FieldResult:
         field="country_of_origin",
         status=status,
         expected=expected,
-        actual=actual,
-        strategy=strategy,
-        score=None,
-        message=(
-            "Canonical country values matched."
-            if status == FieldStatus.PASS
-            else "Canonical country values did not match."
-        ),
+        found=actual,
+        match_type=match_type,
     )
 
 
@@ -194,6 +220,7 @@ _LABELED_ABV_BEFORE_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)")
+_PROOF_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:°\s*)?proof\b", re.IGNORECASE)
 
 
 def _parse_abv(value: str | float | None) -> float | None:
@@ -208,8 +235,9 @@ def _parse_abv(value: str | float | None) -> float | None:
         if match:
             return float(match.group(1))
 
-    if "proof" in text.casefold():
-        return None
+    proof_match = _PROOF_RE.search(text)
+    if proof_match:
+        return float(proof_match.group(1)) / 2
 
     match = _NUMBER_RE.search(text)
     if match:
@@ -218,7 +246,7 @@ def _parse_abv(value: str | float | None) -> float | None:
 
 
 def compare_abv(expected: str | float, actual: str | float | None) -> FieldResult:
-    strategy = (
+    match_type = (
         "abv_numeric_normalize"
         f"+/-{ABV_TOLERANCE_PERCENTAGE_POINTS:g}_percentage_points"
     )
@@ -229,10 +257,8 @@ def compare_abv(expected: str | float, actual: str | float | None) -> FieldResul
             field="abv",
             status=FieldStatus.FAIL,
             expected=expected,
-            actual=actual,
-            strategy=strategy,
-            score=None,
-            message="ABV value could not be parsed.",
+            found=actual,
+            match_type=match_type,
         )
 
     difference = abs(expected_abv - actual_abv)
@@ -246,14 +272,8 @@ def compare_abv(expected: str | float, actual: str | float | None) -> FieldResul
         field="abv",
         status=status,
         expected=expected,
-        actual=actual,
-        strategy=strategy,
-        score=round(difference, 3),
-        message=(
-            "Parsed ABV values matched within tolerance."
-            if status == FieldStatus.PASS
-            else "Parsed ABV values were outside tolerance."
-        ),
+        found=actual,
+        match_type=match_type,
     )
 
 
@@ -273,6 +293,12 @@ _UNIT_TO_ML = {
     "centiliters": 10.0,
     "centilitre": 10.0,
     "centilitres": 10.0,
+    "fl oz": 29.5735295625,
+    "fluid oz": 29.5735295625,
+    "fluid ounce": 29.5735295625,
+    "fluid ounces": 29.5735295625,
+    "floz": 29.5735295625,
+    "oz": 29.5735295625,
 }
 _UNIT_PATTERN = "|".join(
     re.escape(unit) for unit in sorted(_UNIT_TO_ML, key=len, reverse=True)
@@ -286,7 +312,11 @@ _NET_CONTENTS_RE = re.compile(
 def _parse_net_contents_ml(value: str | None) -> float | None:
     if value is None:
         return None
-    match = _NET_CONTENTS_RE.search(value)
+    normalized = value.casefold()
+    normalized = re.sub(r"\bfl\.?\s*oz\.?\b", "fl oz", normalized)
+    normalized = re.sub(r"\bfluid\s+oz\.?\b", "fluid oz", normalized)
+    normalized = re.sub(r"\bfloz\b", "fl oz", normalized)
+    match = _NET_CONTENTS_RE.search(normalized)
     if not match:
         return None
 
@@ -296,7 +326,7 @@ def _parse_net_contents_ml(value: str | None) -> float | None:
 
 
 def compare_net_contents(expected: str, actual: str | None) -> FieldResult:
-    strategy = f"net_contents_unit_normalize+/-{NET_CONTENTS_TOLERANCE_ML:g}_ml"
+    match_type = f"net_contents_unit_normalize+/-{NET_CONTENTS_TOLERANCE_ML:g}_ml"
     expected_ml = _parse_net_contents_ml(expected)
     actual_ml = _parse_net_contents_ml(actual)
     if expected_ml is None or actual_ml is None:
@@ -304,10 +334,8 @@ def compare_net_contents(expected: str, actual: str | None) -> FieldResult:
             field="net_contents",
             status=FieldStatus.FAIL,
             expected=expected,
-            actual=actual,
-            strategy=strategy,
-            score=None,
-            message="Net contents value could not be parsed.",
+            found=actual,
+            match_type=match_type,
         )
 
     difference = abs(expected_ml - actual_ml)
@@ -321,24 +349,18 @@ def compare_net_contents(expected: str, actual: str | None) -> FieldResult:
         field="net_contents",
         status=status,
         expected=expected,
-        actual=actual,
-        strategy=strategy,
-        score=round(difference, 3),
-        message=(
-            "Normalized net contents matched within tolerance."
-            if status == FieldStatus.PASS
-            else "Normalized net contents were outside tolerance."
-        ),
+        found=actual,
+        match_type=match_type,
     )
 
 
 def compare_government_warning(expected: str, actual: str | None) -> FieldResult:
-    strategy = "exact_case_sensitive_whitespace_normalized"
+    match_type = "exact_case_sensitive_whitespace_normalized"
     if actual is None:
         return _missing_actual_result(
             field="government_warning",
             expected=expected,
-            strategy=strategy,
+            match_type=match_type,
         )
 
     status = (
@@ -350,14 +372,8 @@ def compare_government_warning(expected: str, actual: str | None) -> FieldResult
         field="government_warning",
         status=status,
         expected=expected,
-        actual=actual,
-        strategy=strategy,
-        score=None,
-        message=(
-            "Government warning matched exactly."
-            if status == FieldStatus.PASS
-            else "Government warning did not match exactly."
-        ),
+        found=actual,
+        match_type=match_type,
     )
 
 
@@ -371,8 +387,8 @@ def verify_label(
 ) -> VerificationResult:
     fields = [
         compare_brand_name(application.brand_name, label.brand_name),
-        compare_product_class(application.product_class, label.product_class),
-        compare_producer_name(application.producer_name, label.producer_name),
+        compare_class_type(application.class_type, label.class_type),
+        compare_producer(application.producer, label.producer),
         compare_country(application.country_of_origin, label.country_of_origin),
         compare_abv(application.abv, label.abv),
         compare_net_contents(application.net_contents, label.net_contents),
@@ -382,8 +398,8 @@ def verify_label(
         ),
     ]
     verdict = (
-        VerificationVerdict.PASS
+        VerificationVerdict.APPROVED
         if all(field.status == FieldStatus.PASS for field in fields)
         else VerificationVerdict.NEEDS_REVIEW
     )
-    return VerificationResult(verdict=verdict, fields=fields)
+    return VerificationResult(overall_verdict=verdict, results=fields)

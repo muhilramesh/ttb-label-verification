@@ -17,8 +17,8 @@ def application_item(item_id: str, **overrides) -> dict:
     payload = {
         "id": item_id,
         "brand_name": "Sunset Ridge",
-        "product_class": "Cabernet Sauvignon",
-        "producer_name": "North Valley Estate Winery LLC",
+        "class_type": "Cabernet Sauvignon",
+        "producer": "North Valley Estate Winery LLC",
         "country_of_origin": "USA",
         "abv": "45%",
         "net_contents": "750 mL",
@@ -31,12 +31,14 @@ def application_item(item_id: str, **overrides) -> dict:
 def extracted_label(**overrides) -> ExtractedLabel:
     payload = {
         "brand_name": "SUNSET RIDGE",
-        "product_class": "Sauvignon Cabernet",
-        "producer_name": "North Valley Estate Winery, LLC",
+        "class_type": "Sauvignon Cabernet",
+        "producer": "North Valley Estate Winery, LLC",
         "country_of_origin": "USA",
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750ml",
         "government_warning": WARNING,
+        "raw_text": "SUNSET RIDGE\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
+        "extraction_confidence": 0.96,
     }
     payload.update(overrides)
     return ExtractedLabel(**payload)
@@ -130,12 +132,18 @@ def test_batch_returns_summary_for_two_passing_labels() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 2
-    assert body["passed"] == 2
-    assert body["needs_review"] == 0
-    assert body["errors"] == 0
+    assert "total" not in body
+    assert "passed" not in body
+    assert body["summary"] == {
+        "passed": 2,
+        "needs_review": 0,
+        "total": 2,
+        "errors": 0,
+        "latency_ms": body["summary"]["latency_ms"],
+    }
+    assert isinstance(body["summary"]["latency_ms"], int)
     assert [item["id"] for item in body["items"]] == ["row-1", "row-2"]
-    assert all(item["status"] == "PASS" for item in body["items"])
+    assert all(item["status"] == "APPROVED" for item in body["items"])
     assert len(service.calls) == 2
     app.dependency_overrides.clear()
 
@@ -166,19 +174,20 @@ def test_batch_summary_counts_pass_needs_review_and_error() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 3
-    assert body["passed"] == 1
-    assert body["needs_review"] == 1
-    assert body["errors"] == 1
+    assert body["summary"]["total"] == 3
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["needs_review"] == 1
+    assert body["summary"]["errors"] == 1
 
     review_item = body["items"][1]
     assert review_item["status"] == "NEEDS_REVIEW"
     assert review_item["result"]["extracted_label"]["government_warning"] == "Government Warning"
+    assert review_item["result"]["extracted_label"]["raw_text"].startswith("SUNSET RIDGE")
     warning_field = next(
-        field for field in review_item["result"]["fields"]
+        field for field in review_item["result"]["results"]
         if field["field"] == "government_warning"
     )
-    assert warning_field["actual"] == "Government Warning"
+    assert warning_field["found"] == "Government Warning"
 
     error_item = body["items"][2]
     assert error_item["status"] == "ERROR"
@@ -207,8 +216,8 @@ def test_batch_invalid_one_item_application_data_is_item_error() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["passed"] == 1
-    assert body["errors"] == 1
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["errors"] == 1
     assert body["items"][1]["status"] == "ERROR"
     assert body["items"][1]["error"]["code"] == "invalid_application_data"
     assert len(service.calls) == 1
@@ -227,8 +236,8 @@ def test_batch_missing_one_item_image_is_item_error() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["passed"] == 1
-    assert body["errors"] == 1
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["errors"] == 1
     assert body["items"][1]["status"] == "ERROR"
     assert body["items"][1]["error"] == {
         "code": "missing_image",
@@ -252,8 +261,8 @@ def test_batch_invalid_file_type_is_item_error() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["passed"] == 1
-    assert body["errors"] == 1
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["errors"] == 1
     assert body["items"][1]["error"] == {
         "code": "invalid_image_type",
         "message": "Upload a JPEG, PNG, or WebP label image.",
@@ -282,8 +291,8 @@ def test_batch_rate_limited_item_does_not_fail_whole_batch() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["passed"] == 1
-    assert body["errors"] == 1
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["errors"] == 1
     assert body["items"][1]["error"] == {
         "code": "vision_rate_limited",
         "message": "The vision service is temporarily busy. Try again in a minute.",
@@ -375,7 +384,7 @@ def test_batch_processes_labels_concurrently_with_bounded_cap(monkeypatch) -> No
     elapsed = time.perf_counter() - started
 
     assert response.status_code == 200
-    assert response.json()["passed"] == 3
+    assert response.json()["summary"]["passed"] == 3
     assert service.max_active == 2
     assert elapsed < 0.5
     app.dependency_overrides.clear()

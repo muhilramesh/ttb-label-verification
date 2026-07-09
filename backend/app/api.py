@@ -18,6 +18,7 @@ from backend.app.models import (
     BatchItemError,
     BatchItemResult,
     BatchItemStatus,
+    BatchSummary,
     BatchVerificationResult,
     VerificationResult,
     VerificationVerdict,
@@ -97,7 +98,7 @@ async def verify(
         logger.info(
             "verify completed verdict=%s latency_ms=%s image_read_ms=%s "
             "comparison_ms=%s upload_bytes=%s",
-            result.verdict,
+            result.overall_verdict,
             result.latency_ms,
             image_read_ms,
             comparison_ms,
@@ -200,11 +201,11 @@ async def verify_batch(
     result = _batch_result(item_results, start=start)
     logger.info(
         "verify batch completed total=%s passed=%s needs_review=%s errors=%s latency_ms=%s",
-        result.total,
-        result.passed,
-        result.needs_review,
-        result.errors,
-        result.latency_ms,
+        result.summary.total,
+        result.summary.passed,
+        result.summary.needs_review,
+        result.summary.errors,
+        result.summary.latency_ms,
     )
     return result
 
@@ -505,8 +506,8 @@ async def _process_batch_item(
             id=item_id,
             filename=upload.filename,
             status=(
-                BatchItemStatus.PASS
-                if verification.verdict == VerificationVerdict.PASS
+                BatchItemStatus.APPROVED
+                if verification.overall_verdict == VerificationVerdict.APPROVED
                 else BatchItemStatus.NEEDS_REVIEW
             ),
             result=verification,
@@ -637,18 +638,20 @@ def _batch_result(
     *,
     start: float,
 ) -> BatchVerificationResult:
-    passed = sum(1 for item in item_results if item.status == BatchItemStatus.PASS)
+    passed = sum(1 for item in item_results if item.status == BatchItemStatus.APPROVED)
     needs_review = sum(
         1 for item in item_results if item.status == BatchItemStatus.NEEDS_REVIEW
     )
     errors = sum(1 for item in item_results if item.status == BatchItemStatus.ERROR)
     return BatchVerificationResult(
-        total=len(item_results),
-        passed=passed,
-        needs_review=needs_review,
-        errors=errors,
-        latency_ms=_latency_ms(start),
         items=item_results,
+        summary=BatchSummary(
+            passed=passed,
+            needs_review=needs_review,
+            total=len(item_results),
+            errors=errors,
+            latency_ms=_latency_ms(start),
+        ),
     )
 
 

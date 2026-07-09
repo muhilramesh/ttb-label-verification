@@ -24,8 +24,8 @@ const standardGovernmentWarning = "GOVERNMENT WARNING: (1) According to the Surg
 
 const fieldDefinitions = [
   ["brand_name", "Brand Name", "input"],
-  ["product_class", "Product Type", "input"],
-  ["producer_name", "Producer Name", "input"],
+  ["class_type", "Product Type", "input"],
+  ["producer", "Producer Name", "input"],
   ["country_of_origin", "Country of Origin", "input"],
   ["abv", "Alcohol Content, like 45%", "input"],
   ["net_contents", "Net Contents, like 750 mL", "input"],
@@ -34,8 +34,8 @@ const fieldDefinitions = [
 
 const fields = [
   ["brand_name", document.querySelector("#brand-name")],
-  ["product_class", document.querySelector("#product-class")],
-  ["producer_name", document.querySelector("#producer-name")],
+  ["class_type", document.querySelector("#product-class")],
+  ["producer", document.querySelector("#producer-name")],
   ["country_of_origin", document.querySelector("#country-origin")],
   ["abv", document.querySelector("#abv")],
   ["net_contents", document.querySelector("#net-contents")],
@@ -473,11 +473,11 @@ function renderError(message) {
 }
 
 function renderResults(data) {
-  const approved = data.verdict === "PASS";
+  const approved = data.overall_verdict === "APPROVED";
   const verdictText = approved ? "APPROVED" : "NEEDS REVIEW";
   const verdictClass = approved ? "verdict--pass" : "verdict--review";
   const checkedSeconds = typeof data.latency_ms === "number" ? (data.latency_ms / 1000).toFixed(1) : "0.0";
-  const fieldsHtml = (data.fields || []).map(renderFieldResult).join("");
+  const fieldsHtml = (data.results || []).map(renderFieldResult).join("");
 
   resultPanel.hidden = false;
   resultPanel.innerHTML = `
@@ -493,7 +493,8 @@ function renderResults(data) {
 }
 
 function renderBatchResults(data) {
-  const checkedSeconds = typeof data.latency_ms === "number" ? (data.latency_ms / 1000).toFixed(1) : "0.0";
+  const summary = data.summary || {};
+  const checkedSeconds = typeof summary.latency_ms === "number" ? (summary.latency_ms / 1000).toFixed(1) : "0.0";
   const itemsHtml = (data.items || []).map(renderBatchItemResult).join("");
 
   resultPanel.hidden = false;
@@ -501,19 +502,19 @@ function renderBatchResults(data) {
     <div class="batch-summary">
       <div class="summary-tile summary-tile--pass">
         <span class="summary-tile__label">Approved</span>
-        <strong>${data.passed}</strong>
+        <strong>${summary.passed || 0}</strong>
       </div>
       <div class="summary-tile summary-tile--review">
         <span class="summary-tile__label">Needs Review</span>
-        <strong>${data.needs_review}</strong>
+        <strong>${summary.needs_review || 0}</strong>
       </div>
       <div class="summary-tile summary-tile--error">
         <span class="summary-tile__label">Errors</span>
-        <strong>${data.errors}</strong>
+        <strong>${summary.errors || 0}</strong>
       </div>
       <div class="summary-tile">
         <span class="summary-tile__label">Total</span>
-        <strong>${data.total}</strong>
+        <strong>${summary.total || 0}</strong>
       </div>
       <span class="batch-summary__time">Checked in ${checkedSeconds} seconds</span>
     </div>
@@ -525,7 +526,7 @@ function renderBatchResults(data) {
 }
 
 function renderBatchItemResult(item) {
-  const passed = item.status === "PASS";
+  const passed = item.status === "APPROVED";
   const needsReview = item.status === "NEEDS_REVIEW";
   const statusClass = passed ? "status-badge--pass" : needsReview ? "status-badge--fail" : "status-badge--error";
   const label = passed ? "APPROVED" : needsReview ? "NEEDS REVIEW" : "ERROR";
@@ -561,7 +562,7 @@ function renderBatchItemError(item) {
 }
 
 function renderBatchItemDetails(item) {
-  const fieldsHtml = ((item.result && item.result.fields) || []).map(renderFieldResult).join("");
+  const fieldsHtml = ((item.result && item.result.results) || []).map(renderFieldResult).join("");
   return `
     <div class="batch-item__body">
       <div class="results-list">
@@ -576,8 +577,8 @@ function renderFieldResult(result) {
   const statusClass = passed ? "status-badge--pass" : "status-badge--fail";
   const cardClass = passed ? "field-result--pass" : "field-result--fail";
   const fieldName = fieldLabels[result.field] || result.field;
-  const actual = result.actual || "Not found on the label";
-  const details = passed ? renderPassDetails(actual) : renderFailDetails(result, actual);
+  const found = result.found || "Not found on the label";
+  const details = passed ? renderPassDetails(found) : renderFailDetails(result, found);
 
   return `
     <article class="field-result ${cardClass}">
@@ -590,18 +591,18 @@ function renderFieldResult(result) {
   `;
 }
 
-function renderPassDetails(actual) {
+function renderPassDetails(found) {
   return `
     <div class="comparison">
       <div>
         <span class="comparison__label">Found</span>
-        <div class="comparison__value">${escapeHtml(actual)}</div>
+        <div class="comparison__value">${escapeHtml(found)}</div>
       </div>
     </div>
   `;
 }
 
-function renderFailDetails(result, actual) {
+function renderFailDetails(result, found) {
   return `
     <div class="comparison">
       <div>
@@ -610,7 +611,7 @@ function renderFailDetails(result, actual) {
       </div>
       <div>
         <span class="comparison__label">Found</span>
-        <div class="comparison__value">${escapeHtml(actual)}</div>
+        <div class="comparison__value">${escapeHtml(found)}</div>
       </div>
     </div>
     <p class="why-text">Why: ${escapeHtml(failureReason(result))}</p>
@@ -621,7 +622,7 @@ function failureReason(result) {
   if (result.field === "government_warning") {
     return "The government warning must match exactly in wording, capital letters, and punctuation. Line breaks do not matter.";
   }
-  if (!result.actual) {
+  if (!result.found) {
     return "This was not found on the label.";
   }
   if (result.field === "abv" || result.field === "net_contents") {

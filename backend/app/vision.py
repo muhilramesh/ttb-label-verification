@@ -35,18 +35,23 @@ JPEG_QUALITY = 80
 
 EXTRACTED_LABEL_FIELDS = (
     "brand_name",
-    "product_class",
-    "producer_name",
+    "class_type",
+    "producer",
     "country_of_origin",
     "abv",
     "net_contents",
     "government_warning",
+    "raw_text",
+    "extraction_confidence",
 )
 
 VISION_EXTRACTION_PROMPT = """
 Extract visible alcohol-label text into JSON fields:
-brand_name, product_class, producer_name, country_of_origin, abv, net_contents, government_warning.
+brand_name, class_type, producer, country_of_origin, abv, net_contents, government_warning,
+raw_text, extraction_confidence.
 Use null for unknown, unreadable, or non-label fields. Do not infer, correct, normalize, or guess.
+For raw_text, copy all visible label text you can read from the image.
+For extraction_confidence, return a number from 0 to 1 for overall extraction confidence.
 For government_warning, copy visible warning text character-for-character, preserving capitalization,
 punctuation, spacing, line breaks, and OCR-like mistakes. Do not complete it from memory.
 """.strip()
@@ -131,10 +136,16 @@ def extracted_label_json_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "required": list(EXTRACTED_LABEL_FIELDS),
         "properties": {
-            field_name: {"type": ["string", "null"]}
+            field_name: _extracted_label_field_schema(field_name)
             for field_name in EXTRACTED_LABEL_FIELDS
         },
     }
+
+
+def _extracted_label_field_schema(field_name: str) -> dict[str, Any]:
+    if field_name == "extraction_confidence":
+        return {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+    return {"type": ["string", "null"]}
 
 
 def preprocess_label_image(
@@ -367,7 +378,7 @@ def _build_gemini_request_body(
         ],
         "generationConfig": {
             "candidateCount": 1,
-            "maxOutputTokens": 700,
+            "maxOutputTokens": 1200,
             "temperature": 0,
             "thinkingConfig": {
                 "thinkingLevel": thinking_level,

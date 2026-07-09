@@ -30,15 +30,17 @@ def image_bytes(size: tuple[int, int] = (800, 600)) -> bytes:
     return output.getvalue()
 
 
-def extracted_payload(**overrides) -> dict[str, str | None]:
+def extracted_payload(**overrides) -> dict[str, str | float | None]:
     payload = {
         "brand_name": "Sunset Ridge",
-        "product_class": "Cabernet Sauvignon",
-        "producer_name": "North Valley Estate Winery LLC",
+        "class_type": "Cabernet Sauvignon",
+        "producer": "North Valley Estate Winery LLC",
         "country_of_origin": "USA",
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750 mL",
         "government_warning": WARNING,
+        "raw_text": "Sunset Ridge\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
+        "extraction_confidence": 0.94,
     }
     payload.update(overrides)
     return payload
@@ -140,6 +142,8 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
 
     assert result.brand_name == "Sunset Ridge"
     assert result.government_warning == WARNING
+    assert result.raw_text.startswith("Sunset Ridge")
+    assert result.extraction_confidence == 0.94
 
     [call] = transport.calls
     assert call["model"] == "gemini-test-model"
@@ -148,7 +152,7 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
     request_body = call["request_body"]
     generation_config = request_body["generationConfig"]
     assert generation_config["candidateCount"] == 1
-    assert generation_config["maxOutputTokens"] == 700
+    assert generation_config["maxOutputTokens"] == 1200
     assert generation_config["temperature"] == 0
     assert generation_config["thinkingConfig"] == {"thinkingLevel": "minimal"}
 
@@ -159,8 +163,18 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
     schema = response_format["schema"]
     assert schema["additionalProperties"] is False
     assert schema["required"] == list(EXTRACTED_LABEL_FIELDS)
+    assert schema["properties"]["raw_text"] == {"type": ["string", "null"]}
+    assert schema["properties"]["extraction_confidence"] == {
+        "type": ["number", "null"],
+        "minimum": 0,
+        "maximum": 1,
+    }
 
     prompt = request_body["contents"][0]["parts"][0]["text"]
+    assert "class_type" in prompt
+    assert "producer" in prompt
+    assert "raw_text" in prompt
+    assert "extraction_confidence" in prompt
     assert "character-for-character" in prompt
     assert "Do not complete it from memory." in prompt
 
@@ -301,7 +315,7 @@ def test_missing_gemini_api_key_raises_configuration_error(monkeypatch) -> None:
         service.extract_label(image_bytes())
 
 
-def gemini_response(payload: dict[str, str | None]) -> dict:
+def gemini_response(payload: dict[str, str | float | None]) -> dict:
     return gemini_text_response(json.dumps(payload))
 
 

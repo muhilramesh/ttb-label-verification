@@ -107,7 +107,7 @@ Single-label request:
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/verify \
   -F "image=@samples/sample_label.jpg;type=image/jpeg" \
-  -F 'application_data={"brand_name":"SUNSET RIDGE","product_class":"CABERNET SAUVIGNON","producer_name":"North Valley Estate Winery LLC","country_of_origin":"USA","abv":"45%","net_contents":"750 mL","government_warning":"GOVERNMENT WARNING: EXACTLY AS PRINTED"}'
+  -F 'application_data={"brand_name":"SUNSET RIDGE","class_type":"CABERNET SAUVIGNON","producer":"North Valley Estate Winery LLC","country_of_origin":"USA","abv":"45%","net_contents":"750 mL","government_warning":"GOVERNMENT WARNING: EXACTLY AS PRINTED"}'
 ```
 
 Batch requests use `images`, `image_ids`, and `application_data`. Each `image_ids` value maps an uploaded image to one application-data row.
@@ -128,9 +128,9 @@ The comparison engine is pure Python over typed Pydantic models, so it is unit-t
 ## Comparison Rules
 
 - Brand name, product type, and producer name: fuzzy token-sort matching with threshold `90`.
-- Country of origin: normalized country synonyms, including `USA` and `United States`.
-- Alcohol content: numeric ABV normalization, so `45%` can match `45% Alc./Vol. (90 Proof)`.
-- Net contents: unit normalization, so `750 mL` can match `750ml`.
+- Country of origin: normalized country synonyms, including `USA`, `United States`, and common producing-country variants.
+- Alcohol content: numeric ABV normalization, so `45%` can match `45% Alc./Vol. (90 Proof)` or `90 Proof`.
+- Net contents: unit normalization, so `750 mL` can match `750ml`, and `355 mL` can match `12 FL OZ`.
 - Government warning: strict wording, capitalization, and punctuation; whitespace layout is normalized to avoid false failures from OCR line wrapping.
 
 Any field failure makes the overall verdict `NEEDS_REVIEW`.
