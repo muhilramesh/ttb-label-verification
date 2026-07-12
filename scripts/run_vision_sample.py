@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.app.vision import GeminiVisionService, VisionServiceError
+from backend.app.vision import OpenAIVisionService, VisionServiceError
 
 
 DEFAULT_SAMPLE_PATH = Path("samples/sample_label.jpg")
@@ -54,7 +54,7 @@ def create_sample_label(path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the Gemini vision extractor against one label image."
+        description="Run the OpenAI vision extractor against one label image."
     )
     parser.add_argument(
         "image_path",
@@ -83,7 +83,7 @@ def main() -> int:
     if args.create_sample_only:
         return 0
 
-    service = GeminiVisionService(timeout_seconds=args.timeout_seconds)
+    service = OpenAIVisionService(timeout_seconds=args.timeout_seconds)
     try:
         label = service.extract_label(
             args.image_path.read_bytes(),

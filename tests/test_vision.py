@@ -9,7 +9,7 @@ from backend.app.models import ExtractedLabel
 from backend.app.vision import (
     EXTRACTED_LABEL_FIELDS,
     FakeVisionService,
-    GeminiVisionService,
+    OpenAIVisionService,
     VisionConfigurationError,
     VisionInvalidImageError,
     VisionParseError,
@@ -82,12 +82,12 @@ def test_fake_vision_service_returns_label_and_records_call() -> None:
     assert service.calls[0].content_type == "image/jpeg"
 
 
-def test_gemini_service_defaults_to_flash_lite_model(monkeypatch) -> None:
-    monkeypatch.delenv("GEMINI_VISION_MODEL", raising=False)
+def test_openai_service_defaults_to_locked_model(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
 
-    service = GeminiVisionService(transport=StubTransport())
+    service = OpenAIVisionService(transport=StubTransport())
 
-    assert service.model == "gemini-3.1-flash-lite"
+    assert service.model == "gpt-4o-mini"
 
 
 def test_preprocess_downscales_and_reencodes_to_jpeg_data_url() -> None:
@@ -97,7 +97,7 @@ def test_preprocess_downscales_and_reencodes_to_jpeg_data_url() -> None:
     assert processed.data_url.startswith("data:image/jpeg;base64,")
     assert processed.original_width == 2400
     assert processed.original_height == 1200
-    assert max(processed.width, processed.height) == 1024
+    assert max(processed.width, processed.height) == 768
     assert processed.data.startswith(b"\xff\xd8")
     assert len(processed.data) < 500_000
 
@@ -117,12 +117,12 @@ def test_preprocess_ignores_invalid_size_and_quality_env(monkeypatch) -> None:
 
     processed = preprocess_label_image(image_bytes((2400, 1200)))
 
-    assert max(processed.width, processed.height) == 1024
+    assert max(processed.width, processed.height) == 768
 
 
 def test_invalid_image_fails_before_provider_call() -> None:
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(transport=transport)
+    transport = StubTransport(response=openai_response(extracted_payload()))
+    service = OpenAIVisionService(transport=transport)
 
     with pytest.raises(VisionInvalidImageError):
         service.extract_label(b"not an image")
@@ -130,11 +130,11 @@ def test_invalid_image_fails_before_provider_call() -> None:
     assert transport.calls == []
 
 
-def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(
+def test_openai_service_uses_strict_schema_and_low_detail_image() -> None:
+    transport = StubTransport(response=openai_response(extracted_payload()))
+    service = OpenAIVisionService(
         transport=transport,
-        model="gemini-test-model",
+        model="gpt-test-model",
         timeout_seconds=3.5,
     )
 
@@ -146,18 +146,19 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
     assert result.extraction_confidence == 0.94
 
     [call] = transport.calls
-    assert call["model"] == "gemini-test-model"
+    assert call["model"] == "gpt-test-model"
     assert call["timeout_seconds"] == 3.5
 
     request_body = call["request_body"]
-    generation_config = request_body["generationConfig"]
-    assert generation_config["candidateCount"] == 1
-    assert generation_config["maxOutputTokens"] == 1200
-    assert generation_config["temperature"] == 0
-    assert generation_config["thinkingConfig"] == {"thinkingLevel": "minimal"}
+    assert request_body["model"] == "gpt-test-model"
+    assert request_body["temperature"] == 0
+    assert request_body["max_output_tokens"] == 900
+    assert request_body["store"] is False
 
-    response_format = generation_config["responseFormat"]["text"]
-    assert response_format["mimeType"] == "APPLICATION_JSON"
+    response_format = request_body["text"]["format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["name"] == "extracted_label"
+    assert response_format["strict"] is True
     assert response_format["schema"] == extracted_label_json_schema()
 
     schema = response_format["schema"]
@@ -170,7 +171,7 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
         "maximum": 1,
     }
 
-    prompt = request_body["contents"][0]["parts"][0]["text"]
+    prompt = request_body["input"][0]["content"][0]["text"]
     assert "class_type" in prompt
     assert "producer" in prompt
     assert "raw_text" in prompt
@@ -178,66 +179,41 @@ def test_gemini_service_uses_strict_schema_and_inline_image() -> None:
     assert "character-for-character" in prompt
     assert "Do not complete it from memory." in prompt
 
-    image_part = request_body["contents"][0]["parts"][1]["inline_data"]
-    assert image_part["mime_type"] == "image/jpeg"
-    assert isinstance(image_part["data"], str)
-    assert len(image_part["data"]) > 100
+    image_part = request_body["input"][0]["content"][1]
+    assert image_part["type"] == "input_image"
+    assert image_part["detail"] == "low"
+    assert image_part["image_url"].startswith("data:image/jpeg;base64,")
+    assert len(image_part["image_url"]) > 100
 
 
-def test_gemini_service_reads_timeout_from_environment(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "12.5")
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(transport=transport)
-
-    service.extract_label(image_bytes())
-
-    [call] = transport.calls
-    assert call["timeout_seconds"] == 12.5
-
-
-def test_gemini_service_reads_thinking_level_from_environment(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "low")
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(transport=transport)
+def test_openai_service_reads_timeout_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "3.75")
+    transport = StubTransport(response=openai_response(extracted_payload()))
+    service = OpenAIVisionService(transport=transport)
 
     service.extract_label(image_bytes())
 
     [call] = transport.calls
-    generation_config = call["request_body"]["generationConfig"]
-    assert generation_config["thinkingConfig"] == {"thinkingLevel": "low"}
+    assert call["timeout_seconds"] == 3.75
 
 
-def test_gemini_service_uses_default_thinking_level_for_invalid_environment(
+def test_openai_service_uses_default_timeout_for_invalid_environment(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "slow")
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(transport=transport)
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "not-a-number")
+    transport = StubTransport(response=openai_response(extracted_payload()))
+    service = OpenAIVisionService(transport=transport)
 
     service.extract_label(image_bytes())
 
     [call] = transport.calls
-    generation_config = call["request_body"]["generationConfig"]
-    assert generation_config["thinkingConfig"] == {"thinkingLevel": "minimal"}
-
-
-def test_gemini_service_uses_default_timeout_for_invalid_environment(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "not-a-number")
-    transport = StubTransport(response=gemini_response(extracted_payload()))
-    service = GeminiVisionService(transport=transport)
-
-    service.extract_label(image_bytes())
-
-    [call] = transport.calls
-    assert call["timeout_seconds"] == 10.0
+    assert call["timeout_seconds"] == 4.5
 
 
 def test_non_label_or_unreadable_image_returns_all_nulls_from_model() -> None:
     null_payload = {field: None for field in EXTRACTED_LABEL_FIELDS}
-    transport = StubTransport(response=gemini_response(null_payload))
-    service = GeminiVisionService(transport=transport)
+    transport = StubTransport(response=openai_response(null_payload))
+    service = OpenAIVisionService(transport=transport)
 
     result = service.extract_label(image_bytes())
 
@@ -247,11 +223,11 @@ def test_non_label_or_unreadable_image_returns_all_nulls_from_model() -> None:
 def test_misread_warning_is_preserved_from_structured_output() -> None:
     misread_warning = "GOVERNMENT WARNlNG: EXACTLY AS PRlNTED"
     transport = StubTransport(
-        response=gemini_response(
+        response=openai_response(
             extracted_payload(government_warning=misread_warning)
         )
     )
-    service = GeminiVisionService(transport=transport)
+    service = OpenAIVisionService(transport=transport)
 
     result = service.extract_label(image_bytes())
 
@@ -259,8 +235,8 @@ def test_misread_warning_is_preserved_from_structured_output() -> None:
 
 
 def test_malformed_json_raises_parse_error() -> None:
-    transport = StubTransport(response=gemini_text_response("{not-json"))
-    service = GeminiVisionService(transport=transport)
+    transport = StubTransport(response=openai_text_response("{not-json"))
+    service = OpenAIVisionService(transport=transport)
 
     with pytest.raises(VisionParseError):
         service.extract_label(image_bytes())
@@ -269,27 +245,27 @@ def test_malformed_json_raises_parse_error() -> None:
 def test_missing_or_extra_structured_fields_raise_parse_error() -> None:
     missing_payload = extracted_payload()
     missing_payload.pop("government_warning")
-    missing_transport = StubTransport(response=gemini_response(missing_payload))
+    missing_transport = StubTransport(response=openai_response(missing_payload))
 
     with pytest.raises(VisionParseError, match="missing fields"):
-        GeminiVisionService(transport=missing_transport).extract_label(image_bytes())
+        OpenAIVisionService(transport=missing_transport).extract_label(image_bytes())
 
     extra_payload = extracted_payload(extra_field="not allowed")
-    extra_transport = StubTransport(response=gemini_response(extra_payload))
+    extra_transport = StubTransport(response=openai_response(extra_payload))
 
     with pytest.raises(VisionParseError, match="extra fields"):
-        GeminiVisionService(transport=extra_transport).extract_label(image_bytes())
+        OpenAIVisionService(transport=extra_transport).extract_label(image_bytes())
 
 
 def test_provider_timeout_maps_to_typed_timeout_error() -> None:
     transport = StubTransport(error=Timeout("timed out"))
-    service = GeminiVisionService(transport=transport)
+    service = OpenAIVisionService(transport=transport)
 
     with pytest.raises(VisionTimeoutError):
         service.extract_label(image_bytes())
 
 
-def test_gemini_429_maps_to_rate_limit_error(monkeypatch) -> None:
+def test_openai_429_maps_to_rate_limit_error(monkeypatch) -> None:
     def raise_rate_limit(request, timeout):
         raise HTTPError(
             request.full_url,
@@ -299,37 +275,57 @@ def test_gemini_429_maps_to_rate_limit_error(monkeypatch) -> None:
             fp=BytesIO(b'{"error":{"status":"RESOURCE_EXHAUSTED"}}'),
         )
 
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("backend.app.vision.urlopen", raise_rate_limit)
-    service = GeminiVisionService()
+    service = OpenAIVisionService()
 
     with pytest.raises(VisionRateLimitError):
         service.extract_label(image_bytes())
 
 
-def test_missing_gemini_api_key_raises_configuration_error(monkeypatch) -> None:
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    service = GeminiVisionService()
+def test_missing_openai_api_key_raises_configuration_error(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    service = OpenAIVisionService()
 
-    with pytest.raises(VisionConfigurationError, match="GEMINI_API_KEY"):
+    with pytest.raises(VisionConfigurationError, match="OPENAI_API_KEY"):
         service.extract_label(image_bytes())
 
 
-def gemini_response(payload: dict[str, str | float | None]) -> dict:
-    return gemini_text_response(json.dumps(payload))
+def test_model_smoke_check_uses_configured_model() -> None:
+    def model_transport(timeout_seconds, model):
+        return {"id": model, "object": "model", "timeout_seconds": timeout_seconds}
+
+    service = OpenAIVisionService(
+        model="gpt-4o-mini",
+        timeout_seconds=1.5,
+        model_transport=model_transport,
+    )
+
+    assert service.check_model() == {
+        "id": "gpt-4o-mini",
+        "object": "model",
+        "timeout_seconds": 1.5,
+    }
 
 
-def gemini_text_response(text: str) -> dict:
+def openai_response(payload: dict[str, str | float | None]) -> dict:
+    return openai_text_response(json.dumps(payload))
+
+
+def openai_text_response(text: str) -> dict:
     return {
-        "candidates": [
+        "text": {
+            "format": {"type": "json_schema"},
+            "verbosity": "medium",
+        },
+        "output": [
             {
-                "content": {
-                    "parts": [
-                        {
-                            "text": text,
-                        }
-                    ]
-                }
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": text,
+                    }
+                ],
             }
         ]
     }

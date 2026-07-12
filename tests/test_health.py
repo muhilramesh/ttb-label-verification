@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.vision import VisionProviderError
 
 
 client = TestClient(app)
@@ -34,3 +35,36 @@ def test_frontend_script_calls_verify_endpoint() -> None:
     assert 'fetch("/verify"' in response.text
     assert 'formData.append("application_data"' in response.text
     assert "NEEDS REVIEW" in response.text
+
+
+def test_deep_health_returns_model_status(monkeypatch) -> None:
+    def check_model(self):
+        return {"id": self.model, "object": "model"}
+
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
+    monkeypatch.setattr("backend.app.main.OpenAIVisionService.check_model", check_model)
+
+    response = client.get("/health/deep")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["provider"] == "openai"
+    assert response.json()["model"] == "gpt-4o-mini"
+    assert isinstance(response.json()["latency_ms"], int)
+
+
+def test_deep_health_returns_503_for_unavailable_model(monkeypatch) -> None:
+    def check_model(self):
+        raise VisionProviderError("unknown model")
+
+    monkeypatch.setenv("OPENAI_MODEL", "stale-model")
+    monkeypatch.setattr("backend.app.main.OpenAIVisionService.check_model", check_model)
+
+    response = client.get("/health/deep")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["provider"] == "openai"
+    assert body["model"] == "stale-model"
+    assert body["error"]["code"] == "model_unavailable"

@@ -18,7 +18,7 @@ const resultPanel = document.querySelector("#result-panel");
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const maxImageBytes = 8 * 1024 * 1024;
 const maxBatchLabels = 10;
-const requestTimeoutMs = 12000;
+const requestTimeoutMs = 5000;
 const batchRequestTimeoutMs = 65000;
 const standardGovernmentWarning = "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
 

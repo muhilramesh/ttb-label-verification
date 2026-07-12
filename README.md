@@ -30,7 +30,7 @@ Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
 - FastAPI
 - Pydantic
 - Plain HTML, CSS, and JavaScript
-- Gemini vision model through the Gemini API
+- OpenAI vision model through the OpenAI Responses API
 - Railway deployment
 - Pytest test suite
 
@@ -38,18 +38,30 @@ Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
 
 Real secrets must live in local environment variables or Railway service variables. Do not commit `.env`.
 
+| Variable | Default | Required | Notes |
+| --- | --- | --- | --- |
+| `APP_ENV` | `local` | No | App environment label returned by `/health`. |
+| `LOG_LEVEL` | `INFO` | No | Backend logging level. |
+| `OPENAI_API_KEY` | none | Yes | Required for real vision extraction and `/health/deep`. |
+| `OPENAI_MODEL` | `gpt-4o-mini` | No | Exact deployed model name. |
+| `OPENAI_TIMEOUT_SECONDS` | `4.5` | No | Backend provider timeout. Keep production at or below `4.5` for the <5s target. |
+| `IMAGE_MAX_LONG_SIDE` | `768` | No | Max image dimension before the model call. |
+| `IMAGE_JPEG_QUALITY` | `70` | No | JPEG quality after preprocessing. |
+| `BATCH_CONCURRENCY` | `3` | No | Max concurrent model calls for batch verification. |
+
+`OPENAI_API_KEY` is required for real vision extraction. `.env.example` lists variable names only.
+
+Configured deployed model: `gpt-4o-mini`.
+
+Model documentation verification: on 2026-07-12, OpenAI's Responses API reference listed `gpt-4o-mini` as an accepted model, and OpenAI's image/vision guide listed `GPT-4o-mini` as supporting image detail modes. The production deploy also passed `/health/deep` against OpenAI's Models API on that date.
+
+Model-name smoke check:
+
 ```bash
-APP_ENV=local
-GEMINI_API_KEY=
-GEMINI_VISION_MODEL=gemini-3.1-flash-lite
-GEMINI_TIMEOUT_SECONDS=10
-GEMINI_THINKING_LEVEL=minimal
-IMAGE_MAX_LONG_SIDE=1024
-IMAGE_JPEG_QUALITY=80
-BATCH_CONCURRENCY=3
+curl https://YOUR-DEPLOYED-URL/health/deep
 ```
 
-`GEMINI_API_KEY` is required for real vision extraction. `.env.example` lists the variable names only.
+That endpoint calls OpenAI's Models API for the configured `OPENAI_MODEL`. It should return HTTP `200` before a deploy is considered healthy.
 
 ## Run Locally
 
@@ -62,16 +74,15 @@ uv sync --python python3.12
 Run the app:
 
 ```bash
-export GEMINI_VISION_MODEL=gemini-3.1-flash-lite
-export GEMINI_THINKING_LEVEL=minimal
-export GEMINI_TIMEOUT_SECONDS=10
-export IMAGE_MAX_LONG_SIDE=1024
-export IMAGE_JPEG_QUALITY=80
+export OPENAI_MODEL=gpt-4o-mini
+export OPENAI_TIMEOUT_SECONDS=4.5
+export IMAGE_MAX_LONG_SIDE=768
+export IMAGE_JPEG_QUALITY=70
 export BATCH_CONCURRENCY=3
 uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Set `GEMINI_API_KEY` in your shell or local `.env` before running. Do not commit that value.
+Set `OPENAI_API_KEY` in your shell or local `.env` before running. Do not commit that value.
 
 Open:
 
@@ -83,6 +94,7 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/deep
 ```
 
 ## Run Tests
@@ -119,7 +131,7 @@ The backend is stateless. It receives uploaded image bytes and application data,
 The vision service:
 
 - downscales and re-encodes images before the model call;
-- uses Gemini structured JSON output instead of ad hoc string parsing;
+- uses OpenAI structured JSON output instead of ad hoc string parsing;
 - returns partial data when fields are unreadable;
 - maps timeouts, rate limits, malformed output, and missing configuration into readable API errors.
 
@@ -149,7 +161,23 @@ Batch mode processes labels concurrently with a bounded concurrency limit. One b
 
 ## Performance Notes
 
-The original goal was a strict under-5-second single-label check. Live testing on the available free-tier Gemini access showed provider latency variance that made that target unrealistic for this prototype. In practice, successful checks often take around 7.5 seconds, so the proof-of-concept uses a practical backend timeout of `10` seconds and a frontend timeout of `12` seconds. Faster successful checks can still complete around 3 to 4 seconds, but provider latency and free-tier quota limits can vary.
+Single-label verification has a hard target of under `5` seconds on the deployed URL. The backend provider timeout defaults to `4.5` seconds, and the frontend aborts a single-label request after `5` seconds.
+
+Measure deployed single-label latency after every deploy:
+
+```bash
+uv run python scripts/measure_single_label_latency.py \
+  --url https://YOUR-DEPLOYED-URL \
+  --samples 20
+```
+
+Current OpenAI deployment measurement:
+
+| Date | URL | Model | Samples | Successful | Timeouts | p50 | p95 | Script |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-07-12 | `https://ttb-label-verification-production-6496.up.railway.app` | `gpt-4o-mini` | 20 | 20 | 0 | 2,839 ms | 3,195 ms | `scripts/measure_single_label_latency.py` |
+
+The measured p50 and p95 meet the under-5-second target, and all 20 requests completed successfully.
 
 Batch mode can take longer because several labels are processed together. Concurrency is bounded with `BATCH_CONCURRENCY`.
 
@@ -158,13 +186,13 @@ Batch mode can take longer because several labels are processed together. Concur
 - One image represents one label record.
 - The app is stateless and does not store uploaded images or results.
 - Application data is supplied as seven required fields.
-- Reviewers will use a configured `GEMINI_API_KEY` for real extraction.
+- Reviewers will use a configured `OPENAI_API_KEY` for real extraction.
 - Railway provides production environment variables.
 
 ## Limitations
 
 - Vision/OCR can misread small or blurry warning text.
-- Free-tier Gemini quota or rate limits can temporarily block live testing.
+- OpenAI quota or rate limits can temporarily block live testing.
 - The app does not persist history or support user accounts.
 - The app does not currently support multiple images for one label because that slowed model calls during testing.
 - This is a proof of concept, not a full TTB production workflow.

@@ -21,17 +21,16 @@ from backend.app.models import ExtractedLabel
 
 logger = logging.getLogger("backend.app.vision")
 
-DEFAULT_VISION_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_GEMINI_TIMEOUT_SECONDS = 10.0
-GEMINI_TIMEOUT_ENV = "GEMINI_TIMEOUT_SECONDS"
-GEMINI_THINKING_LEVEL_ENV = "GEMINI_THINKING_LEVEL"
+DEFAULT_VISION_MODEL = "gpt-4o-mini"
+DEFAULT_OPENAI_TIMEOUT_SECONDS = 4.5
+OPENAI_MODEL_ENV = "OPENAI_MODEL"
+OPENAI_TIMEOUT_ENV = "OPENAI_TIMEOUT_SECONDS"
 IMAGE_MAX_LONG_SIDE_ENV = "IMAGE_MAX_LONG_SIDE"
 IMAGE_JPEG_QUALITY_ENV = "IMAGE_JPEG_QUALITY"
-GEMINI_API_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-)
-MAX_IMAGE_LONG_SIDE = 1024
-JPEG_QUALITY = 80
+OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
+OPENAI_MODELS_ENDPOINT = "https://api.openai.com/v1/models/{model}"
+MAX_IMAGE_LONG_SIDE = 768
+JPEG_QUALITY = 70
 
 EXTRACTED_LABEL_FIELDS = (
     "brand_name",
@@ -217,14 +216,16 @@ def _to_rgb_on_white(image: Image.Image) -> Image.Image:
 
 def _structured_output_format() -> dict[str, Any]:
     return {
-        "text": {
-            "mimeType": "APPLICATION_JSON",
+        "format": {
+            "type": "json_schema",
+            "name": "extracted_label",
+            "strict": True,
             "schema": extracted_label_json_schema(),
-        },
+        }
     }
 
 
-class GeminiVisionService:
+class OpenAIVisionService:
     def __init__(
         self,
         *,
@@ -232,16 +233,17 @@ class GeminiVisionService:
         model: str | None = None,
         timeout_seconds: float | None = None,
         transport: Any | None = None,
+        model_transport: Any | None = None,
     ) -> None:
         self.api_key = api_key
-        self.model = model or os.getenv("GEMINI_VISION_MODEL", DEFAULT_VISION_MODEL)
+        self.model = model or os.getenv(OPENAI_MODEL_ENV, DEFAULT_VISION_MODEL)
         self.timeout_seconds = (
             timeout_seconds
             if timeout_seconds is not None
-            else _gemini_timeout_seconds_from_env()
+            else _openai_timeout_seconds_from_env()
         )
-        self.thinking_level = _gemini_thinking_level_from_env()
         self._transport = transport
+        self._model_transport = model_transport
 
     def extract_label(
         self,
@@ -310,15 +312,24 @@ class GeminiVisionService:
         )
         return label
 
+    def check_model(self) -> dict[str, Any]:
+        try:
+            if self._model_transport is not None:
+                return self._model_transport(self.timeout_seconds, self.model)
+            return self._get_openai_model()
+        except VisionServiceError:
+            raise
+        except Exception as exc:
+            if _is_timeout_error(exc):
+                raise VisionTimeoutError("Vision model smoke check timed out.") from exc
+            raise VisionProviderError("Vision model smoke check failed.") from exc
+
     def _create_response(self, processed_image: ProcessedImage) -> Any:
-        request_body = _build_gemini_request_body(
-            processed_image,
-            thinking_level=self.thinking_level,
-        )
+        request_body = _build_openai_request_body(processed_image, model=self.model)
         try:
             if self._transport is not None:
                 return self._transport(request_body, self.timeout_seconds, self.model)
-            return self._post_gemini_request(request_body)
+            return self._post_openai_request(request_body)
         except VisionServiceError:
             raise
         except Exception as exc:
@@ -326,18 +337,17 @@ class GeminiVisionService:
                 raise VisionTimeoutError("Vision model request timed out.") from exc
             raise VisionProviderError("Vision model request failed.") from exc
 
-    def _post_gemini_request(self, request_body: dict[str, Any]) -> Any:
-        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
+    def _post_openai_request(self, request_body: dict[str, Any]) -> Any:
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise VisionConfigurationError("GEMINI_API_KEY is not configured.")
+            raise VisionConfigurationError("OPENAI_API_KEY is not configured.")
 
-        url = GEMINI_API_ENDPOINT.format(model=quote(self.model, safe=""))
         request = Request(
-            url,
+            OPENAI_RESPONSES_ENDPOINT,
             data=json.dumps(request_body).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "x-goog-api-key": api_key,
+                "Authorization": f"Bearer {api_key}",
             },
             method="POST",
         )
@@ -349,42 +359,63 @@ class GeminiVisionService:
             detail = exc.read().decode("utf-8", errors="replace")
             if exc.code == 429:
                 raise VisionRateLimitError(
-                    f"Gemini API quota or rate limit was reached: {detail}"
+                    f"OpenAI API quota or rate limit was reached: {detail}"
                 ) from exc
-            raise VisionProviderError(f"Gemini API request failed: {detail}") from exc
+            raise VisionProviderError(f"OpenAI API request failed: {detail}") from exc
         except json.JSONDecodeError as exc:
-            raise VisionParseError("Gemini API response was not valid JSON.") from exc
+            raise VisionParseError("OpenAI API response was not valid JSON.") from exc
+
+    def _get_openai_model(self) -> dict[str, Any]:
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise VisionConfigurationError("OPENAI_API_KEY is not configured.")
+
+        request = Request(
+            OPENAI_MODELS_ENDPOINT.format(model=quote(self.model, safe="")),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="GET",
+        )
+
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 429:
+                raise VisionRateLimitError(
+                    f"OpenAI API quota or rate limit was reached: {detail}"
+                ) from exc
+            raise VisionProviderError(f"OpenAI model check failed: {detail}") from exc
+        except json.JSONDecodeError as exc:
+            raise VisionParseError("OpenAI model check response was not valid JSON.") from exc
 
 
-def _build_gemini_request_body(
+def _build_openai_request_body(
     processed_image: ProcessedImage,
     *,
-    thinking_level: str,
+    model: str,
 ) -> dict[str, Any]:
     return {
-        "contents": [
+        "model": model,
+        "input": [
             {
                 "role": "user",
-                "parts": [
-                    {"text": VISION_EXTRACTION_PROMPT},
+                "content": [
+                    {"type": "input_text", "text": VISION_EXTRACTION_PROMPT},
                     {
-                        "inline_data": {
-                            "mime_type": processed_image.content_type,
-                            "data": base64.b64encode(processed_image.data).decode("ascii"),
-                        }
+                        "type": "input_image",
+                        "image_url": processed_image.data_url,
+                        "detail": "low",
                     },
                 ],
             }
         ],
-        "generationConfig": {
-            "candidateCount": 1,
-            "maxOutputTokens": 1200,
-            "temperature": 0,
-            "thinkingConfig": {
-                "thinkingLevel": thinking_level,
-            },
-            "responseFormat": _structured_output_format(),
-        },
+        "text": _structured_output_format(),
+        "temperature": 0,
+        "max_output_tokens": 900,
+        "store": False,
     }
 
 
@@ -405,32 +436,20 @@ def _elapsed_ms(start: float) -> int:
     return max(0, int((time.perf_counter() - start) * 1000))
 
 
-def _gemini_timeout_seconds_from_env() -> float:
-    raw_timeout = os.getenv(GEMINI_TIMEOUT_ENV)
+def _openai_timeout_seconds_from_env() -> float:
+    raw_timeout = os.getenv(OPENAI_TIMEOUT_ENV)
     if raw_timeout is None or not raw_timeout.strip():
-        return DEFAULT_GEMINI_TIMEOUT_SECONDS
+        return DEFAULT_OPENAI_TIMEOUT_SECONDS
 
     try:
         timeout_seconds = float(raw_timeout)
     except ValueError:
-        return DEFAULT_GEMINI_TIMEOUT_SECONDS
+        return DEFAULT_OPENAI_TIMEOUT_SECONDS
 
     if timeout_seconds <= 0:
-        return DEFAULT_GEMINI_TIMEOUT_SECONDS
+        return DEFAULT_OPENAI_TIMEOUT_SECONDS
 
     return timeout_seconds
-
-
-def _gemini_thinking_level_from_env() -> str:
-    raw_level = os.getenv(GEMINI_THINKING_LEVEL_ENV)
-    if raw_level is None or not raw_level.strip():
-        return "minimal"
-
-    level = raw_level.strip().lower()
-    if level not in {"minimal", "low", "medium", "high"}:
-        return "minimal"
-
-    return level
 
 
 def _int_from_env(
@@ -469,10 +488,6 @@ def _extract_structured_payload(response: Any) -> Any:
     if output_text:
         return output_text
 
-    text = _get_value(response, "text")
-    if text:
-        return text
-
     candidates = _get_value(response, "candidates")
     if isinstance(candidates, list):
         for candidate in candidates:
@@ -498,6 +513,10 @@ def _extract_structured_payload(response: Any) -> Any:
                 text = _get_value(content_item, "text")
                 if text:
                     return text
+
+    text = _get_value(response, "text")
+    if isinstance(text, str) and text:
+        return text
 
     raise VisionParseError("Vision response did not contain structured output.")
 

@@ -11,7 +11,7 @@ def test_frontend_verify_request_has_client_timeout() -> None:
 
     assert response.status_code == 200
     assert "AbortController" in response.text
-    assert "requestTimeoutMs = 12000" in response.text
+    assert "requestTimeoutMs = 5000" in response.text
     assert "The label took too long to read." in response.text
     assert "Line breaks do not matter." in response.text
 

@@ -24,7 +24,7 @@ from backend.app.models import (
     VerificationVerdict,
 )
 from backend.app.vision import (
-    GeminiVisionService,
+    OpenAIVisionService,
     VisionConfigurationError,
     VisionInvalidImageError,
     VisionParseError,
@@ -47,7 +47,7 @@ BATCH_CONCURRENCY_ENV = "BATCH_CONCURRENCY"
 
 
 def get_vision_service() -> VisionService:
-    return GeminiVisionService()
+    return OpenAIVisionService()
 
 
 @router.post("/verify", response_model=VerificationResult)
