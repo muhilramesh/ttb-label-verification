@@ -20,8 +20,6 @@ const maxImageBytes = 8 * 1024 * 1024;
 const maxBatchLabels = 10;
 const requestTimeoutMs = 5000;
 const batchRequestTimeoutMs = 65000;
-const standardGovernmentWarning = "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
-
 const fieldDefinitions = [
   ["brand_name", "Brand Name", "input"],
   ["class_type", "Product Type", "input"],
@@ -336,11 +334,10 @@ function batchRowFromFile(file, index) {
 
 function renderBatchInput(rowId, name, label, type) {
   const inputId = `batch-${rowId}-${name}`;
-  const defaultValue = name === "government_warning" ? standardGovernmentWarning : "";
   if (type === "textarea") {
     return `
       <label class="field-label" for="${escapeHtml(inputId)}">${escapeHtml(label)}</label>
-      <textarea id="${escapeHtml(inputId)}" rows="5" required>${escapeHtml(defaultValue)}</textarea>
+      <textarea id="${escapeHtml(inputId)}" rows="5" required></textarea>
     `;
   }
   return `
@@ -648,14 +645,5 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function prefillStandardWarning() {
-  const warningInput = document.querySelector("#government-warning");
-  if (warningInput && !warningInput.value.trim()) {
-    warningInput.value = standardGovernmentWarning;
-  }
-}
-
 updateFormState();
 updateBatchFormState();
-prefillStandardWarning();
-updateFormState();

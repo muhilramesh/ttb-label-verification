@@ -16,13 +16,13 @@ def test_frontend_verify_request_has_client_timeout() -> None:
     assert "Line breaks do not matter." in response.text
 
 
-def test_frontend_prefills_standard_government_warning() -> None:
+def test_frontend_requires_manual_government_warning() -> None:
     response = client.get("/static/app.js")
 
     assert response.status_code == 200
-    assert "standardGovernmentWarning" in response.text
-    assert "According to the Surgeon General" in response.text
-    assert "prefillStandardWarning" in response.text
+    assert "standardGovernmentWarning" not in response.text
+    assert "According to the Surgeon General" not in response.text
+    assert "prefillStandardWarning" not in response.text
 
 
 def test_frontend_batch_view_is_available() -> None:
