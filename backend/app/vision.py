@@ -49,6 +49,9 @@ raw_text, extraction_confidence.
 Use null for unknown, unreadable, or non-label fields. Do not infer, correct, normalize, or guess.
 For raw_text, copy all visible label text you can read from the image.
 For extraction_confidence, return a number from 0 to 1 for overall extraction confidence.
+For country_of_origin, prefer an explicit origin statement. A domestic U.S. producer or bottler
+may show only a U.S. city and state; copy that city/state value. Never use a U.S. importer address
+as the origin of an imported product.
 For government_warning, copy visible warning text character-for-character, preserving capitalization,
 punctuation, spacing, line breaks, and OCR-like mistakes. Do not complete it from memory.
 """.strip()

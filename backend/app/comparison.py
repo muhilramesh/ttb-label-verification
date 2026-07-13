@@ -167,6 +167,30 @@ _COUNTRY_SYNONYMS = {
     "holland": "netherlands",
 }
 
+_US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC", "PR", "VI", "GU", "AS", "MP",
+}
+_US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
+    "maryland", "massachusetts", "michigan", "minnesota", "mississippi", "missouri",
+    "montana", "nebraska", "nevada", "new hampshire", "new jersey", "new mexico",
+    "new york", "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota", "tennessee",
+    "texas", "utah", "vermont", "virginia", "washington", "west virginia",
+    "wisconsin", "wyoming", "district of columbia", "puerto rico",
+    "u s virgin islands", "guam", "american samoa", "northern mariana islands",
+}
+_IMPORTER_CONTEXT_RE = re.compile(
+    r"\b(?:imported\s+by|imported\s+for|importer\s+of\s+record|u\.?s\.?\s+importer)\b",
+    re.IGNORECASE,
+)
+
 
 def _canonical_country(value: str) -> str:
     normalized = _normalize_text(value)
@@ -179,7 +203,39 @@ def _canonical_country(value: str) -> str:
     return _COUNTRY_SYNONYMS.get(normalized, normalized)
 
 
-def compare_country(expected: str, actual: str | None) -> FieldResult:
+def _is_us_city_state(value: str) -> bool:
+    state = value.rsplit(",", maxsplit=1)
+    if len(state) != 2 or not state[0].strip():
+        return False
+    suffix = re.sub(r"[^A-Za-z\s]", "", state[1]).strip()
+    return suffix.upper() in _US_STATE_CODES or suffix.casefold() in _US_STATE_NAMES
+
+
+def _has_explicit_foreign_origin(raw_text: str) -> bool:
+    normalized = _normalize_text(raw_text)
+    origin_prefix = r"(?:product\s+of|made\s+in|produced\s+in|imported\s+from)"
+    for synonym, canonical in _COUNTRY_SYNONYMS.items():
+        if canonical == "united states":
+            continue
+        if re.search(rf"\b{origin_prefix}\s+(?:the\s+)?{re.escape(synonym)}\b", normalized):
+            return True
+    return False
+
+
+def _can_use_us_domestic_address(expected: str, actual: str, raw_text: str | None) -> bool:
+    if _canonical_country(expected) != "united states" or not _is_us_city_state(actual):
+        return False
+    if raw_text is None:
+        return True
+    return not _IMPORTER_CONTEXT_RE.search(raw_text) and not _has_explicit_foreign_origin(raw_text)
+
+
+def compare_country(
+    expected: str,
+    actual: str | None,
+    *,
+    raw_text: str | None = None,
+) -> FieldResult:
     match_type = "country_synonym_exact"
     if actual is None:
         return _missing_actual_result(
@@ -190,11 +246,10 @@ def compare_country(expected: str, actual: str | None) -> FieldResult:
 
     expected_country = _canonical_country(expected)
     actual_country = _canonical_country(actual)
-    status = (
-        FieldStatus.PASS
-        if expected_country == actual_country
-        else FieldStatus.FAIL
-    )
+    domestic_address_match = _can_use_us_domestic_address(expected, actual, raw_text)
+    status = FieldStatus.PASS if expected_country == actual_country or domestic_address_match else FieldStatus.FAIL
+    if domestic_address_match:
+        match_type = "us_domestic_address"
 
     return _field_result(
         field="country_of_origin",
@@ -389,7 +444,11 @@ def verify_label(
         compare_brand_name(application.brand_name, label.brand_name),
         compare_class_type(application.class_type, label.class_type),
         compare_producer(application.producer, label.producer),
-        compare_country(application.country_of_origin, label.country_of_origin),
+        compare_country(
+            application.country_of_origin,
+            label.country_of_origin,
+            raw_text=label.raw_text,
+        ),
         compare_abv(application.abv, label.abv),
         compare_net_contents(application.net_contents, label.net_contents),
         compare_government_warning(

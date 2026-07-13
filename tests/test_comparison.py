@@ -113,6 +113,56 @@ def test_country_different_country_fails() -> None:
     assert result.found == "Canada"
 
 
+def test_us_city_state_matches_expected_usa() -> None:
+    result = compare_country("USA", "KINGSTON, NY")
+
+    assert_pass(result)
+    assert result.found == "KINGSTON, NY"
+    assert result.match_type == "us_domestic_address"
+
+
+def test_us_city_full_state_name_matches_expected_usa() -> None:
+    assert_pass(compare_country("United States", "Portland, Oregon"))
+
+
+def test_us_importer_address_does_not_imply_us_origin() -> None:
+    result = compare_country(
+        "USA",
+        "Miami, FL",
+        raw_text="PRODUCT OF CANADA. IMPORTED BY SAMPLE IMPORTS, MIAMI, FL.",
+    )
+
+    assert_fail(result)
+    assert result.match_type == "country_synonym_exact"
+
+
+def test_explicit_foreign_origin_blocks_us_address_fallback() -> None:
+    result = compare_country(
+        "USA",
+        "Miami, FL",
+        raw_text="PRODUCT OF CANADA. BOTTLED FOR SAMPLE COMPANY, MIAMI, FL.",
+    )
+
+    assert_fail(result)
+
+
+def test_us_address_does_not_match_non_us_expected_country() -> None:
+    assert_fail(compare_country("Canada", "KINGSTON, NY"))
+
+
+def test_verify_label_uses_raw_text_for_domestic_address_context() -> None:
+    label = passing_label().model_copy(
+        update={
+            "country_of_origin": "KINGSTON, NY",
+            "raw_text": "DISTILLED AND BOTTLED BY SAMPLE DISTILLERY, KINGSTON, NY.",
+        }
+    )
+
+    result = verify_label(passing_application(), label)
+
+    assert result.overall_verdict == VerificationVerdict.APPROVED
+
+
 def test_abv_ignores_proof_when_percent_is_present() -> None:
     result = compare_abv("45%", "45% Alc./Vol. (90 Proof)")
 
