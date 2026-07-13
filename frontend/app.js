@@ -1,4 +1,5 @@
 import { createResultRenderer } from "./results.js";
+import { escapeHtml } from "./html.js";
 
 const singleModeButton = document.querySelector("#single-mode-button");
 const batchModeButton = document.querySelector("#batch-mode-button");

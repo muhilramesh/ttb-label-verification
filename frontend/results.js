@@ -1,12 +1,9 @@
+import { escapeHtml } from "./html.js";
+
 export function createResultRenderer(resultPanel, fieldLabels) {
   function focus() {
     resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     resultPanel.focus({ preventScroll: true });
-  }
-
-  function escapeHtml(value) {
-    return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
   }
 
   function readableError(data) {

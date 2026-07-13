@@ -53,6 +53,8 @@ def test_frontend_batch_request_has_summary_drilldown_and_progress() -> None:
     assert "data-back-image-row" not in response.text
     assert "backFile" not in response.text
     assert "batchRows = batchRows.concat" in response.text
+    assert 'import { escapeHtml } from "./html.js"' in response.text
+    assert client.get("/static/html.js").status_code == 200
     assert "batchImageInput.value = \"\"" in response.text
     assert "batchCopyFirstButton" not in response.text
     assert "Approved" in results.text
