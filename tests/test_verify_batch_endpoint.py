@@ -265,7 +265,7 @@ def test_batch_invalid_file_type_is_item_error() -> None:
     assert body["summary"]["errors"] == 1
     assert body["items"][1]["error"] == {
         "code": "invalid_image_type",
-        "message": "Upload a JPEG, PNG, or WebP label image.",
+            "message": "Upload a JPEG, PNG, WebP, HEIC, or HEIF label image.",
     }
     assert len(service.calls) == 1
     app.dependency_overrides.clear()

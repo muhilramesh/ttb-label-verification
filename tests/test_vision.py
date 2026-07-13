@@ -276,7 +276,7 @@ def test_openai_429_maps_to_rate_limit_error(monkeypatch) -> None:
         )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("backend.app.vision.urlopen", raise_rate_limit)
+    monkeypatch.setattr("backend.app.openai_client.urlopen", raise_rate_limit)
     service = OpenAIVisionService()
 
     with pytest.raises(VisionRateLimitError):

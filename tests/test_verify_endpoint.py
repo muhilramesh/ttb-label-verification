@@ -249,7 +249,7 @@ def test_verify_rejects_unsupported_file_type(client: TestClient) -> None:
         response,
         400,
         "invalid_image_type",
-        "Upload a JPEG, PNG, or WebP label image.",
+        "Upload a JPEG, PNG, WebP, HEIC, or HEIF label image.",
     )
 
 

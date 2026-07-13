@@ -34,20 +34,25 @@ Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
 - Railway deployment
 - Pytest test suite
 
+## Architecture at a Glance
+
+`main.py` assembles FastAPI and static assets. Route handlers validate uploads and delegate concurrent batch work; `comparison.py` contains deterministic matching. Vision interfaces remain in `vision.py`, while provider errors and HEIC/JPEG preprocessing live in focused modules. The frontend fetches runtime limits from `/health`; no database or persistent file storage is used.
+
 ## Environment Variables
 
 Real secrets must live in local environment variables or Railway service variables. Do not commit `.env`.
 
-| Variable | Default | Required | Notes |
+| Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `APP_ENV` | `local` | No | App environment label returned by `/health`. |
-| `LOG_LEVEL` | `INFO` | No | Backend logging level. |
-| `OPENAI_API_KEY` | none | Yes | Required for real vision extraction and `/health/deep`. |
-| `OPENAI_MODEL` | `gpt-4o-mini` | No | Exact deployed model name. |
-| `OPENAI_TIMEOUT_SECONDS` | `4.5` | No | Backend provider timeout. Keep production at or below `4.5` for the <5s target. |
-| `IMAGE_MAX_LONG_SIDE` | `768` | No | Max image dimension before the model call. |
-| `IMAGE_JPEG_QUALITY` | `70` | No | JPEG quality after preprocessing. |
-| `BATCH_CONCURRENCY` | `3` | No | Max concurrent model calls for batch verification. |
+| `APP_ENV` | No | `local` | Environment label returned by `/health`. |
+| `LOG_LEVEL` | No | `INFO` | Backend logging level. |
+| `OPENAI_API_KEY` | Yes | none | Authenticates extraction and deep health checks. |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | Pins the deployed vision model. |
+| `OPENAI_TIMEOUT_SECONDS` | No | `4.5` | Bounds provider latency for the five-second target. |
+| `IMAGE_MAX_LONG_SIDE` | No | `768` | Maximum image dimension sent to the model. |
+| `IMAGE_JPEG_QUALITY` | No | `70` | JPEG quality after preprocessing. |
+| `BATCH_CONCURRENCY` | No | `3` | Maximum concurrent batch model calls. |
+| `BATCH_MAX_LABELS` | No | `10` | Per-request batch cap returned by `/health` and enforced by the API. |
 
 `OPENAI_API_KEY` is required for real vision extraction. `.env.example` lists variable names only.
 
@@ -79,6 +84,7 @@ export OPENAI_TIMEOUT_SECONDS=4.5
 export IMAGE_MAX_LONG_SIDE=768
 export IMAGE_JPEG_QUALITY=70
 export BATCH_CONCURRENCY=3
+export BATCH_MAX_LABELS=10
 uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -105,6 +111,14 @@ node --check frontend/app.js
 ```
 
 The current test suite covers the comparison engine, vision service parsing and error mapping, single-label endpoint, batch endpoint, frontend static behavior, and health route.
+
+## Live Smoke Check
+
+Run one real image through the deployed frontend API, comparison engine, and configured model. The command exits non-zero for HTTP errors or a verdict other than `APPROVED`:
+
+```bash
+uv run python scripts/live_smoke.py --url https://ttb-label-verification-production-6496.up.railway.app
+```
 
 ## API Examples
 
@@ -159,6 +173,8 @@ Batch mode processes labels concurrently with a bounded concurrency limit. One b
 - The production key is configured in Railway, not in the repository.
 - Error responses do not expose stack traces.
 
+Secret-handling audit: tracked source, examples, tests, and documentation contain no production API key; `.gitignore` excludes `.env` and `.env.*` except the placeholder-only `.env.example`.
+
 ## Performance Notes
 
 Single-label verification has a hard target of under `5` seconds on the deployed URL. The backend provider timeout defaults to `4.5` seconds, and the frontend aborts a single-label request after `5` seconds.
@@ -196,3 +212,14 @@ Batch mode can take longer because several labels are processed together. Concur
 - The app does not persist history or support user accounts.
 - The app does not currently support multiple images for one label because that slowed model calls during testing.
 - This is a proof of concept, not a full TTB production workflow.
+
+## Tradeoffs
+
+- Images are downscaled for speed and cost, which can reduce accuracy on very small text.
+- Batch concurrency improves throughput but can encounter provider rate limits.
+- Runtime configuration is exposed through `/health` only for non-secret UI limits.
+- The app is stateless, so it cannot provide history or audit persistence.
+
+## Approach and Tools
+
+AI-assisted work produced initial scaffolding, extraction prompts, repetitive tests, and documentation drafts. Hand-written and manually reviewed work defines the response contracts, deterministic comparison rules, exact-warning behavior, request validation, error mapping, security boundaries, deployment configuration, and acceptance measurements. OpenAI performs label-text extraction only; application verdicts come from the deterministic Python comparison engine.

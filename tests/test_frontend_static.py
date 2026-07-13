@@ -8,12 +8,13 @@ client = TestClient(app)
 
 def test_frontend_verify_request_has_client_timeout() -> None:
     response = client.get("/static/app.js")
+    results = client.get("/static/results.js")
 
     assert response.status_code == 200
     assert "AbortController" in response.text
     assert "requestTimeoutMs = 5000" in response.text
     assert "The label took too long to read." in response.text
-    assert "Line breaks do not matter." in response.text
+    assert "Line breaks do not matter." in results.text
 
 
 def test_frontend_requires_manual_government_warning() -> None:
@@ -36,11 +37,14 @@ def test_frontend_batch_view_is_available() -> None:
     assert "batch-image-input" in response.text
     assert "multiple" in response.text
     assert "Check All Labels" in response.text
+    assert 'accept="image/*"' in response.text
+    assert 'id="batch-limit"' in response.text
     assert "Copy First Label to All" not in response.text
 
 
 def test_frontend_batch_request_has_summary_drilldown_and_progress() -> None:
     response = client.get("/static/app.js")
+    results = client.get("/static/results.js")
 
     assert response.status_code == 200
     assert 'fetch("/verify/batch"' in response.text
@@ -51,20 +55,20 @@ def test_frontend_batch_request_has_summary_drilldown_and_progress() -> None:
     assert "batchRows = batchRows.concat" in response.text
     assert "batchImageInput.value = \"\"" in response.text
     assert "batchCopyFirstButton" not in response.text
-    assert "Approved" in response.text
-    assert "Needs Review" in response.text
-    assert "Total" in response.text
-    assert "<details" in response.text
-    assert "Expected" in response.text
-    assert "Found" in response.text
+    assert "Approved" in results.text
+    assert "Needs Review" in results.text
+    assert "Total" in results.text
+    assert "<details" in results.text
+    assert "Expected" in results.text
+    assert "Found" in results.text
     assert "Checking ${count} label" in response.text
-    assert "progress-bar" in response.text
-    assert 'role="progressbar"' in response.text
-    assert 'aria-label="Checking labels"' in response.text
+    assert "progress-bar" in results.text
+    assert 'role="progressbar"' in results.text
+    assert 'aria-label="Checking labels"' in results.text
 
 
 def test_frontend_uses_spec_response_field_names() -> None:
-    response = client.get("/static/app.js")
+    response = client.get("/static/results.js")
 
     assert response.status_code == 200
     assert "data.overall_verdict" in response.text
@@ -88,6 +92,9 @@ def test_frontend_uses_spec_application_field_names() -> None:
     assert '"producer"' in js
     assert '"product_class"' not in js
     assert '"producer_name"' not in js
+    assert 'fetch("/health")' in js
+    assert 'inputmode="decimal"' in html
+    assert "free-tier service may be starting up" in js
 
 
 def test_frontend_accessibility_hooks_are_present() -> None:

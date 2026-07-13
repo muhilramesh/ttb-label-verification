@@ -15,7 +15,17 @@ def test_health_returns_ok() -> None:
         "status": "ok",
         "service": "ttb-label-verification",
         "environment": "local",
+        "batch_max_labels": 10,
     }
+
+
+def test_health_returns_configured_batch_limit(monkeypatch) -> None:
+    monkeypatch.setenv("BATCH_MAX_LABELS", "6")
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["batch_max_labels"] == 6
 
 
 def test_root_serves_frontend() -> None:
@@ -30,11 +40,12 @@ def test_root_serves_frontend() -> None:
 
 def test_frontend_script_calls_verify_endpoint() -> None:
     response = client.get("/static/app.js")
+    results = client.get("/static/results.js")
 
     assert response.status_code == 200
     assert 'fetch("/verify"' in response.text
     assert 'formData.append("application_data"' in response.text
-    assert "NEEDS REVIEW" in response.text
+    assert "NEEDS REVIEW" in results.text
 
 
 def test_deep_health_returns_model_status(monkeypatch) -> None:

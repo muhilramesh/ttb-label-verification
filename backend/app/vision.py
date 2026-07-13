@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass, field
-from io import BytesIO
 import json
 import logging
 import os
 import socket
 import time
 from typing import Any, Protocol
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.error import URLError
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
+from backend.app.image_processing import (
+    IMAGE_JPEG_QUALITY_ENV, IMAGE_MAX_LONG_SIDE_ENV, JPEG_QUALITY,
+    MAX_IMAGE_LONG_SIDE, ProcessedImage, preprocess_label_image,
+)
 from backend.app.models import ExtractedLabel
+from backend.app.openai_client import create_response, get_model
+from backend.app.vision_errors import (
+    VisionConfigurationError, VisionInvalidImageError, VisionParseError,
+    VisionProviderError, VisionRateLimitError, VisionServiceError, VisionTimeoutError,
+)
 
 
 logger = logging.getLogger("backend.app.vision")
@@ -25,12 +29,6 @@ DEFAULT_VISION_MODEL = "gpt-4o-mini"
 DEFAULT_OPENAI_TIMEOUT_SECONDS = 4.5
 OPENAI_MODEL_ENV = "OPENAI_MODEL"
 OPENAI_TIMEOUT_ENV = "OPENAI_TIMEOUT_SECONDS"
-IMAGE_MAX_LONG_SIDE_ENV = "IMAGE_MAX_LONG_SIDE"
-IMAGE_JPEG_QUALITY_ENV = "IMAGE_JPEG_QUALITY"
-OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-OPENAI_MODELS_ENDPOINT = "https://api.openai.com/v1/models/{model}"
-MAX_IMAGE_LONG_SIDE = 768
-JPEG_QUALITY = 70
 
 EXTRACTED_LABEL_FIELDS = (
     "brand_name",
@@ -56,34 +54,6 @@ punctuation, spacing, line breaks, and OCR-like mistakes. Do not complete it fro
 """.strip()
 
 
-class VisionServiceError(Exception):
-    """Base error for image extraction failures."""
-
-
-class VisionConfigurationError(VisionServiceError):
-    """Raised when the vision service is missing required configuration."""
-
-
-class VisionInvalidImageError(VisionServiceError):
-    """Raised when the uploaded bytes are not a valid image."""
-
-
-class VisionTimeoutError(VisionServiceError):
-    """Raised when the model call times out."""
-
-
-class VisionRateLimitError(VisionServiceError):
-    """Raised when the model provider rejects the request for quota/rate limits."""
-
-
-class VisionProviderError(VisionServiceError):
-    """Raised when the model provider fails before returning usable output."""
-
-
-class VisionParseError(VisionServiceError):
-    """Raised when provider output cannot be validated as an ExtractedLabel."""
-
-
 class VisionService(Protocol):
     def extract_label(
         self,
@@ -91,17 +61,6 @@ class VisionService(Protocol):
         content_type: str | None = None,
     ) -> ExtractedLabel:
         ...
-
-
-@dataclass(frozen=True)
-class ProcessedImage:
-    data: bytes
-    content_type: str
-    data_url: str
-    original_width: int
-    original_height: int
-    width: int
-    height: int
 
 
 @dataclass(frozen=True)
@@ -145,73 +104,6 @@ def _extracted_label_field_schema(field_name: str) -> dict[str, Any]:
     if field_name == "extraction_confidence":
         return {"type": ["number", "null"], "minimum": 0, "maximum": 1}
     return {"type": ["string", "null"]}
-
-
-def preprocess_label_image(
-    image_bytes: bytes,
-    *,
-    max_long_side: int | None = None,
-    jpeg_quality: int | None = None,
-) -> ProcessedImage:
-    if not image_bytes:
-        raise VisionInvalidImageError("Image upload is empty.")
-
-    max_long_side = max_long_side or _int_from_env(
-        IMAGE_MAX_LONG_SIDE_ENV,
-        default=MAX_IMAGE_LONG_SIDE,
-        minimum=640,
-        maximum=2000,
-    )
-    jpeg_quality = jpeg_quality or _int_from_env(
-        IMAGE_JPEG_QUALITY_ENV,
-        default=JPEG_QUALITY,
-        minimum=60,
-        maximum=95,
-    )
-
-    try:
-        with Image.open(BytesIO(image_bytes)) as image:
-            image = ImageOps.exif_transpose(image)
-            original_width, original_height = image.size
-            image = _to_rgb_on_white(image)
-            image.thumbnail(
-                (max_long_side, max_long_side),
-                Image.Resampling.LANCZOS,
-            )
-
-            output = BytesIO()
-            image.save(
-                output,
-                format="JPEG",
-                quality=jpeg_quality,
-                optimize=True,
-            )
-    except (UnidentifiedImageError, OSError) as exc:
-        raise VisionInvalidImageError("Image upload is not a readable image.") from exc
-
-    data = output.getvalue()
-    data_url = (
-        "data:image/jpeg;base64,"
-        f"{base64.b64encode(data).decode('ascii')}"
-    )
-    return ProcessedImage(
-        data=data,
-        content_type="image/jpeg",
-        data_url=data_url,
-        original_width=original_width,
-        original_height=original_height,
-        width=image.width,
-        height=image.height,
-    )
-
-
-def _to_rgb_on_white(image: Image.Image) -> Image.Image:
-    if image.mode in ("RGBA", "LA") or "transparency" in image.info:
-        rgba = image.convert("RGBA")
-        background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-        background.alpha_composite(rgba)
-        return background.convert("RGB")
-    return image.convert("RGB")
 
 
 def _structured_output_format() -> dict[str, Any]:
@@ -341,55 +233,13 @@ class OpenAIVisionService:
         api_key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise VisionConfigurationError("OPENAI_API_KEY is not configured.")
-
-        request = Request(
-            OPENAI_RESPONSES_ENDPOINT,
-            data=json.dumps(request_body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            if exc.code == 429:
-                raise VisionRateLimitError(
-                    f"OpenAI API quota or rate limit was reached: {detail}"
-                ) from exc
-            raise VisionProviderError(f"OpenAI API request failed: {detail}") from exc
-        except json.JSONDecodeError as exc:
-            raise VisionParseError("OpenAI API response was not valid JSON.") from exc
+        return create_response(request_body, api_key, self.timeout_seconds)
 
     def _get_openai_model(self) -> dict[str, Any]:
         api_key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise VisionConfigurationError("OPENAI_API_KEY is not configured.")
-
-        request = Request(
-            OPENAI_MODELS_ENDPOINT.format(model=quote(self.model, safe="")),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="GET",
-        )
-
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            if exc.code == 429:
-                raise VisionRateLimitError(
-                    f"OpenAI API quota or rate limit was reached: {detail}"
-                ) from exc
-            raise VisionProviderError(f"OpenAI model check failed: {detail}") from exc
-        except json.JSONDecodeError as exc:
-            raise VisionParseError("OpenAI model check response was not valid JSON.") from exc
+        return get_model(self.model, api_key, self.timeout_seconds)
 
 
 def _build_openai_request_body(

@@ -28,9 +28,9 @@
           <h2 id="image-title">Label Image</h2>
           <label class="file-picker" for="image-input">
             <span class="file-picker__title">Choose label image</span>
-            <span id="file-name" class="file-picker__meta">JPEG, PNG, or WebP</span>
+            <span id="file-name" class="file-picker__meta">Choose an image</span>
           </label>
-          <input id="image-input" name="image" type="file" accept="image/jpeg,image/png,image/webp" />
+          <input id="image-input" name="image" type="file" accept="image/*" />
           <img id="image-preview" class="image-preview" alt="Selected label preview" hidden />
         </section>
 
@@ -51,10 +51,10 @@
             <input id="country-origin" name="country_of_origin" type="text" autocomplete="off" required />
 
             <label class="field-label" for="abv">Alcohol Content, like 45%</label>
-            <input id="abv" name="abv" type="text" autocomplete="off" required />
+            <input id="abv" name="abv" type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]+)?([ ]?%|[ ]?(proof|Proof|PROOF))?" autocomplete="off" required />
 
             <label class="field-label" for="net-contents">Net Contents, like 750 mL</label>
-            <input id="net-contents" name="net_contents" type="text" autocomplete="off" required />
+            <input id="net-contents" name="net_contents" type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]+)?[ ]?(mL|ml|ML|L|l|cL|cl|CL|fl oz|FL OZ|oz|OZ)" autocomplete="off" required />
 
             <label class="field-label" for="government-warning">Government Warning</label>
             <textarea id="government-warning" name="government_warning" rows="5" required></textarea>
@@ -75,9 +75,9 @@
             <h2 id="batch-image-title">Label Images</h2>
             <label class="file-picker" for="batch-image-input">
               <span class="file-picker__title">Add label images</span>
-              <span id="batch-file-name" class="file-picker__meta">Choose one or more JPEG, PNG, or WebP images</span>
+              <span id="batch-file-name" class="file-picker__meta">Choose up to <span id="batch-limit">...</span> images</span>
             </label>
-            <input id="batch-image-input" name="images" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+            <input id="batch-image-input" name="images" type="file" accept="image/*" multiple />
           </section>
 
           <section id="batch-rows-section" class="form-section" aria-labelledby="batch-fields-title" hidden>
@@ -98,6 +98,6 @@
       <section id="result-panel" class="result-panel" tabindex="-1" hidden aria-live="polite"></section>
     </main>
 
-    <script src="/static/app.js?v=manual-warning-1"></script>
+    <script type="module" src="/static/app.js?v=quality-4"></script>
   </body>
 </html>
