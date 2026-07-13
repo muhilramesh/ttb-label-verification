@@ -52,7 +52,7 @@ def test_deep_health_returns_model_status(monkeypatch) -> None:
     def check_model(self):
         return {"id": self.model, "object": "model"}
 
-    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-nano")
     monkeypatch.setattr("backend.app.main.OpenAIVisionService.check_model", check_model)
 
     response = client.get("/health/deep")
@@ -60,7 +60,7 @@ def test_deep_health_returns_model_status(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["provider"] == "openai"
-    assert response.json()["model"] == "gpt-4o-mini"
+    assert response.json()["model"] == "gpt-5.4-nano"
     assert isinstance(response.json()["latency_ms"], int)
 
 

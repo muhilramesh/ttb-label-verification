@@ -47,7 +47,7 @@ Real secrets must live in local environment variables or Railway service variabl
 | `APP_ENV` | No | `local` | Environment label returned by `/health`. |
 | `LOG_LEVEL` | No | `INFO` | Backend logging level. |
 | `OPENAI_API_KEY` | Yes | none | Authenticates extraction and deep health checks. |
-| `OPENAI_MODEL` | No | `gpt-4o-mini` | Pins the deployed vision model. |
+| `OPENAI_MODEL` | No | `gpt-5.4-nano` | Pins the deployed vision model. |
 | `OPENAI_TIMEOUT_SECONDS` | No | `4.5` | Bounds provider latency for the five-second target. |
 | `IMAGE_MAX_LONG_SIDE` | No | `768` | Maximum image dimension sent to the model. |
 | `IMAGE_JPEG_QUALITY` | No | `70` | JPEG quality after preprocessing. |
@@ -56,9 +56,9 @@ Real secrets must live in local environment variables or Railway service variabl
 
 `OPENAI_API_KEY` is required for real vision extraction. `.env.example` lists variable names only.
 
-Configured deployed model: `gpt-4o-mini`.
+Configured deployed model: `gpt-5.4-nano` (replaced `gpt-4o-mini` on 2026-07-13).
 
-Model documentation verification: on 2026-07-12, OpenAI's Responses API reference listed `gpt-4o-mini` as an accepted model, and OpenAI's image/vision guide listed `GPT-4o-mini` as supporting image detail modes. The production deploy also passed `/health/deep` against OpenAI's Models API on that date.
+Model verification: on 2026-07-13, [OpenAI's model documentation](https://developers.openai.com/api/docs/models/gpt-5.4-nano) listed `gpt-5.4-nano` as supporting image input, the Responses API, and structured outputs. The production deploy also passed `/health/deep` against OpenAI's Models API with that exact model name.
 
 Model-name smoke check:
 
@@ -79,7 +79,7 @@ uv sync --python python3.12
 Run the app:
 
 ```bash
-export OPENAI_MODEL=gpt-4o-mini
+export OPENAI_MODEL=gpt-5.4-nano
 export OPENAI_TIMEOUT_SECONDS=4.5
 export IMAGE_MAX_LONG_SIDE=768
 export IMAGE_JPEG_QUALITY=70
@@ -191,9 +191,11 @@ Current OpenAI deployment measurement:
 
 | Date | URL | Model | Samples | Successful | Timeouts | p50 | p95 | Script |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-07-13 | `https://ttb-label-verification-production-6496.up.railway.app` | `gpt-5.4-nano` | 20 | 20 | 0 | 1,652 ms | 2,233 ms | `scripts/measure_single_label_latency.py` |
+| 2026-07-13 | `https://ttb-label-verification-production-6496.up.railway.app` | `gpt-5.4-nano` | 20 | 19 | 1 | 1,883 ms | 3,105 ms | `scripts/measure_single_label_latency.py` |
 | 2026-07-12 | `https://ttb-label-verification-production-6496.up.railway.app` | `gpt-4o-mini` | 20 | 20 | 0 | 2,839 ms | 3,195 ms | `scripts/measure_single_label_latency.py` |
 
-The measured p50 and p95 meet the under-5-second target, and all 20 requests completed successfully.
+The latest Nano run completed all 20 requests and met the under-5-second target. Across both Nano runs, 39 of 40 requests succeeded; one request reached the 4.5-second provider timeout. The older `gpt-4o-mini` row is retained as a historical comparison rather than an active configuration.
 
 Batch mode can take longer because several labels are processed together. Concurrency is bounded with `BATCH_CONCURRENCY`.
 
@@ -207,7 +209,9 @@ Batch mode can take longer because several labels are processed together. Concur
 
 ## Limitations
 
-- Vision/OCR can misread small or blurry warning text.
+- Vision/OCR can misread small or blurry text and can confuse a prominent fanciful name with a smaller class/type designation.
+- A tested 503 x 373 composite image containing front label, back label, and bottle views produced tiny compliance text. The model read `5.3%` instead of the visible `13.5%` and classified `STORMCHASER` instead of `Chardonnay`. The application correctly surfaced these as expected-versus-found failures rather than silently approving them.
+- Higher-resolution, tightly cropped label images improve extraction. The service currently uses low image detail and JPEG preprocessing to meet the five-second latency requirement, so perfect OCR cannot be guaranteed.
 - OpenAI quota or rate limits can temporarily block live testing.
 - The app does not persist history or support user accounts.
 - The app does not currently support multiple images for one label because that slowed model calls during testing.

@@ -25,7 +25,7 @@ from backend.app.vision_errors import (
 
 logger = logging.getLogger("backend.app.vision")
 
-DEFAULT_VISION_MODEL = "gpt-4o-mini"
+DEFAULT_VISION_MODEL = "gpt-5.4-nano"
 DEFAULT_OPENAI_TIMEOUT_SECONDS = 4.5
 OPENAI_MODEL_ENV = "OPENAI_MODEL"
 OPENAI_TIMEOUT_ENV = "OPENAI_TIMEOUT_SECONDS"

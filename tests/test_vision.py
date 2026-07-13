@@ -87,7 +87,7 @@ def test_openai_service_defaults_to_locked_model(monkeypatch) -> None:
 
     service = OpenAIVisionService(transport=StubTransport())
 
-    assert service.model == "gpt-4o-mini"
+    assert service.model == "gpt-5.4-nano"
 
 
 def test_preprocess_downscales_and_reencodes_to_jpeg_data_url() -> None:
@@ -296,13 +296,13 @@ def test_model_smoke_check_uses_configured_model() -> None:
         return {"id": model, "object": "model", "timeout_seconds": timeout_seconds}
 
     service = OpenAIVisionService(
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano",
         timeout_seconds=1.5,
         model_transport=model_transport,
     )
 
     assert service.check_model() == {
-        "id": "gpt-4o-mini",
+        "id": "gpt-5.4-nano",
         "object": "model",
         "timeout_seconds": 1.5,
     }
