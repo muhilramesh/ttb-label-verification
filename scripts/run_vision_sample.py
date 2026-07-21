@@ -36,16 +36,21 @@ def create_sample_label(path: Path) -> None:
         font_large = ImageFont.truetype("Arial.ttf", 92)
         font_medium = ImageFont.truetype("Arial.ttf", 62)
         font_small = ImageFont.truetype("Arial.ttf", 46)
+        font_warning = ImageFont.truetype("Arial Bold.ttf", 46)
     except OSError:
         font_large = ImageFont.load_default(size=92)
         font_medium = ImageFont.load_default(size=62)
         font_small = ImageFont.load_default(size=46)
+        try:
+            font_warning = ImageFont.truetype("DejaVuSans-Bold.ttf", 46)
+        except OSError:
+            font_warning = font_small
 
     y = 150
     for index, line in enumerate(SAMPLE_LABEL_LINES):
         font = font_large if index == 0 else font_medium
         if line.startswith("GOVERNMENT WARNING"):
-            font = font_small
+            font = font_warning
         draw.text((90, y), line, fill="black", font=font)
         y += 145 if index == 0 else 120
 

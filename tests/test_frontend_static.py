@@ -63,7 +63,9 @@ def test_frontend_batch_request_has_summary_drilldown_and_progress() -> None:
     assert "<details" in results.text
     assert "Expected" in results.text
     assert "Found" in results.text
-    assert "Checking ${count} label" in response.text
+    assert "checkBatchChunk(chunk)" in response.text
+    assert "maxBatchRequestLabels" in response.text
+    assert "of ${count} complete" in results.text
     assert "progress-bar" in results.text
     assert 'role="progressbar"' in results.text
     assert 'aria-label="Checking labels"' in results.text
@@ -95,6 +97,8 @@ def test_frontend_uses_spec_application_field_names() -> None:
     assert '"product_class"' not in js
     assert '"producer_name"' not in js
     assert 'fetch("/health")' in js
+    assert 'fetch("/health/deep"' in js
+    assert "Producer / Bottler Name and Address" in html
     assert 'inputmode="decimal"' in html
     assert "free-tier service may be starting up" in js
 

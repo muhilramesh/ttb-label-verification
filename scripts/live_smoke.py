@@ -16,8 +16,11 @@ def main() -> int:
     parser.add_argument("--image", type=Path, default=Path("samples/sample_label.jpg"))
     parser.add_argument("--timeout-seconds", type=float, default=6.0)
     args = parser.parse_args()
-    if not args.image.exists():
+    if args.image == Path("samples/sample_label.jpg"):
         create_sample_label(args.image)
+    elif not args.image.exists():
+        print(f"FAIL: image not found: {args.image}", file=sys.stderr)
+        return 1
     started = time.perf_counter()
     try:
         status, raw_body = _post_verify(_verify_url(args.url), image_bytes=args.image.read_bytes(), timeout_seconds=args.timeout_seconds)

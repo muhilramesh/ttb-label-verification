@@ -409,8 +409,13 @@ def compare_net_contents(expected: str, actual: str | None) -> FieldResult:
     )
 
 
-def compare_government_warning(expected: str, actual: str | None) -> FieldResult:
-    match_type = "exact_case_sensitive_whitespace_normalized"
+def compare_government_warning(
+    expected: str,
+    actual: str | None,
+    *,
+    heading_bold: bool | None = None,
+) -> FieldResult:
+    match_type = "exact_case_sensitive_whitespace_normalized+bold_heading"
     if actual is None:
         return _missing_actual_result(
             field="government_warning",
@@ -420,7 +425,10 @@ def compare_government_warning(expected: str, actual: str | None) -> FieldResult
 
     status = (
         FieldStatus.PASS
-        if _normalize_warning_layout(expected) == _normalize_warning_layout(actual)
+        if (
+            _normalize_warning_layout(expected) == _normalize_warning_layout(actual)
+            and heading_bold is True
+        )
         else FieldStatus.FAIL
     )
     return _field_result(
@@ -454,6 +462,7 @@ def verify_label(
         compare_government_warning(
             application.government_warning,
             label.government_warning,
+            heading_bold=label.government_warning_heading_bold,
         ),
     ]
     verdict = (

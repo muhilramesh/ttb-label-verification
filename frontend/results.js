@@ -17,14 +17,14 @@ export function createResultRenderer(resultPanel, fieldLabels) {
     focus();
   }
 
-  function renderBatchProgress(count) {
+  function renderBatchProgress(count, completed = 0) {
     resultPanel.hidden = false;
-    resultPanel.innerHTML = `<div class="progress-panel"><h2>Checking ${count} label${count === 1 ? "" : "s"}...</h2><div class="progress-bar" role="progressbar" aria-label="Checking labels"><span></span></div></div>`;
+    resultPanel.innerHTML = `<div class="progress-panel"><h2>Checking labels...</h2><p>${completed} of ${count} complete</p><div class="progress-bar" role="progressbar" aria-label="Checking labels" aria-valuemin="0" aria-valuemax="${count}" aria-valuenow="${completed}"><span></span></div></div>`;
     focus();
   }
 
   function failureReason(result) {
-    if (result.field === "government_warning") return "The government warning must match exactly in wording, capital letters, and punctuation. Line breaks do not matter.";
+    if (result.field === "government_warning") return "The warning text must match exactly, and GOVERNMENT WARNING: must be bold. Line breaks do not matter.";
     if (!result.found) return "This was not found on the label.";
     if (result.field === "abv" || result.field === "net_contents") return "The amounts do not match.";
     if (result.field === "country_of_origin") return "The countries do not match.";

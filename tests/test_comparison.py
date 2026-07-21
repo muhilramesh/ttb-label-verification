@@ -40,6 +40,7 @@ def passing_label() -> ExtractedLabel:
         abv="45% Alc./Vol. (90 Proof)",
         net_contents="750ml",
         government_warning=WARNING,
+        government_warning_heading_bold=True,
     )
 
 
@@ -260,15 +261,27 @@ def test_government_warning_missing_value_fails() -> None:
 
 
 def test_government_warning_exact_all_caps_passes() -> None:
-    result = compare_government_warning(WARNING, WARNING)
+    result = compare_government_warning(WARNING, WARNING, heading_bold=True)
 
     assert_pass(result)
+
+
+def test_government_warning_non_bold_heading_fails() -> None:
+    result = compare_government_warning(WARNING, WARNING, heading_bold=False)
+
+    assert_fail(result)
+
+
+def test_government_warning_unknown_heading_weight_fails() -> None:
+    result = compare_government_warning(WARNING, WARNING, heading_bold=None)
+
+    assert_fail(result)
 
 
 def test_government_warning_line_breaks_and_indentation_pass() -> None:
     actual = "  GOVERNMENT WARNING:\n    THIS IS THE EXACT\n  WARNING TEXT  "
 
-    result = compare_government_warning(WARNING, actual)
+    result = compare_government_warning(WARNING, actual, heading_bold=True)
 
     assert_pass(result)
     assert result.found == actual

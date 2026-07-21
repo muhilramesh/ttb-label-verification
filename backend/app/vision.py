@@ -38,6 +38,7 @@ EXTRACTED_LABEL_FIELDS = (
     "abv",
     "net_contents",
     "government_warning",
+    "government_warning_heading_bold",
     "raw_text",
     "extraction_confidence",
 )
@@ -45,15 +46,19 @@ EXTRACTED_LABEL_FIELDS = (
 VISION_EXTRACTION_PROMPT = """
 Extract visible alcohol-label text into JSON fields:
 brand_name, class_type, producer, country_of_origin, abv, net_contents, government_warning,
-raw_text, extraction_confidence.
+government_warning_heading_bold, raw_text, extraction_confidence.
 Use null for unknown, unreadable, or non-label fields. Do not infer, correct, normalize, or guess.
 For raw_text, copy all visible label text you can read from the image.
 For extraction_confidence, return a number from 0 to 1 for overall extraction confidence.
+For producer, copy the complete visible producer/bottler name and address together. Do not omit
+the city, state, postal code, or country when they are printed as part of that statement.
 For country_of_origin, prefer an explicit origin statement. A domestic U.S. producer or bottler
 may show only a U.S. city and state; copy that city/state value. Never use a U.S. importer address
 as the origin of an imported product.
 For government_warning, copy visible warning text character-for-character, preserving capitalization,
 punctuation, spacing, line breaks, and OCR-like mistakes. Do not complete it from memory.
+For government_warning_heading_bold, return true only when the visible words "GOVERNMENT WARNING:"
+are clearly bold relative to the warning body, false when clearly not bold, and null when unreadable.
 """.strip()
 
 
@@ -106,8 +111,9 @@ def extracted_label_json_schema() -> dict[str, Any]:
 def _extracted_label_field_schema(field_name: str) -> dict[str, Any]:
     if field_name == "extraction_confidence":
         return {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+    if field_name == "government_warning_heading_bold":
+        return {"type": ["boolean", "null"]}
     return {"type": ["string", "null"]}
-
 
 def _structured_output_format() -> dict[str, Any]:
     return {

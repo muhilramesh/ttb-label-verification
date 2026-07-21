@@ -44,6 +44,7 @@ def extracted_label(**overrides) -> ExtractedLabel:
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750ml",
         "government_warning": WARNING,
+        "government_warning_heading_bold": True,
         "raw_text": "SUNSET RIDGE\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
         "extraction_confidence": 0.97,
     }
@@ -102,6 +103,7 @@ def test_verify_returns_pass_result_with_latency(
     assert body["extracted_label"]["government_warning"] == WARNING
     assert body["extracted_label"]["raw_text"].startswith("SUNSET RIDGE")
     assert body["extracted_label"]["extraction_confidence"] == 0.97
+    assert body["extracted_label"]["government_warning_heading_bold"] is True
     assert len(body["results"]) == 7
     assert all(field["status"] == "PASS" for field in body["results"])
     assert all("found" in field for field in body["results"])
@@ -144,10 +146,29 @@ def test_verify_returns_needs_review_and_surfaces_warning_text(
     assert warning_result["status"] == "FAIL"
     assert warning_result["expected"] == WARNING
     assert warning_result["found"] == misread_warning
-    assert warning_result["match_type"] == "exact_case_sensitive_whitespace_normalized"
+    assert warning_result["match_type"] == "exact_case_sensitive_whitespace_normalized+bold_heading"
+
+
+def test_verify_rejects_warning_when_heading_is_not_bold(
+    client: TestClient,
+    fake_service: FakeVisionService,
+) -> None:
+    fake_service.label = extracted_label(government_warning_heading_bold=False)
+
+    response = post_verify(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["overall_verdict"] == VerificationVerdict.NEEDS_REVIEW
+    warning_result = next(
+        field for field in body["results"] if field["field"] == "government_warning"
+    )
+    assert warning_result["status"] == "FAIL"
+    assert warning_result["found"] == WARNING
 
 
 def test_verify_accepts_warning_with_label_line_breaks(
+
     client: TestClient,
     fake_service: FakeVisionService,
 ) -> None:

@@ -13,15 +13,15 @@ Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
 - Extracts label text into structured JSON.
 - Compares every field and shows per-field `PASS` or `FAIL`.
 - Shows expected-vs-found values on failures.
-- Surfaces the extracted government warning text for review.
-- Supports batch checking with per-label results and summary counts.
+- Surfaces the extracted government warning text and heading-weight check for review.
+- Supports up to 300 uploaded labels, sent to the backend in bounded groups with combined results.
 - Returns readable errors for bad input, timeouts, provider limits, and missing configuration.
 
 ## Demo Checklist
 
 - Single-label check: upload one image, fill the seven fields, and click `Check Label`.
 - Batch check: open `Batch Labels`, add label images one at a time or all together, fill each row, and click `Check All Labels`.
-- Exact-warning behavior: capitalization, wording, and punctuation are strict; line-break layout is normalized because label OCR often wraps warning text.
+- Exact-warning behavior: capitalization, wording, punctuation, and a bold `GOVERNMENT WARNING:` heading are required; line-break layout is normalized because label OCR often wraps warning text.
 - Error behavior: submit without an image or with a wrong file type to see a plain-English 4xx response.
 
 ## Tech Stack
@@ -36,7 +36,7 @@ Deployed URL: https://ttb-label-verification-production-6496.up.railway.app
 
 ## Architecture at a Glance
 
-`main.py` assembles FastAPI and static assets. Route handlers validate uploads and delegate concurrent batch work; `comparison.py` contains deterministic matching. Vision interfaces remain in `vision.py`, while provider errors and HEIC/JPEG preprocessing live in focused modules. The frontend fetches runtime limits from `/health`; no database or persistent file storage is used.
+`main.py` assembles FastAPI and static assets. Route handlers validate uploads and delegate concurrent batch work; `comparison.py` contains deterministic matching. Vision interfaces remain in `vision.py`, while provider errors and HEIC/JPEG preprocessing live in focused modules. The frontend fetches runtime limits from `/health`, chunks large upload sets into bounded API requests, and warms `/health/deep` while the user fills the form; no database or persistent file storage is used.
 
 ## Environment Variables
 
@@ -53,6 +53,7 @@ Real secrets must live in local environment variables or Railway service variabl
 | `IMAGE_JPEG_QUALITY` | No | `70` | JPEG quality after preprocessing. |
 | `BATCH_CONCURRENCY` | No | `3` | Maximum concurrent batch model calls. |
 | `BATCH_MAX_LABELS` | No | `10` | Per-request batch cap returned by `/health` and enforced by the API. |
+| `BATCH_UPLOAD_MAX_LABELS` | No | `300` | Maximum labels the browser accepts and divides into bounded requests. |
 
 `OPENAI_API_KEY` is required for real vision extraction. `.env.example` lists variable names only.
 
@@ -85,6 +86,7 @@ export IMAGE_MAX_LONG_SIDE=768
 export IMAGE_JPEG_QUALITY=70
 export BATCH_CONCURRENCY=3
 export BATCH_MAX_LABELS=10
+export BATCH_UPLOAD_MAX_LABELS=300
 uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -153,17 +155,17 @@ The comparison engine is pure Python over typed Pydantic models, so it is unit-t
 
 ## Comparison Rules
 
-- Brand name, product type, and producer name: fuzzy token-sort matching with threshold `90`.
+- Brand name, product type, and the complete producer/bottler name-and-address statement: fuzzy token-sort matching with threshold `90`.
 - Country of origin: normalized country synonyms, including `USA`, `United States`, and common producing-country variants.
 - Alcohol content: numeric ABV normalization, so `45%` can match `45% Alc./Vol. (90 Proof)` or `90 Proof`.
 - Net contents: unit normalization, so `750 mL` can match `750ml`, and `355 mL` can match `12 FL OZ`.
-- Government warning: strict wording, capitalization, and punctuation; whitespace layout is normalized to avoid false failures from OCR line wrapping.
+- Government warning: strict wording, capitalization, and punctuation, plus a visually bold `GOVERNMENT WARNING:` heading; whitespace layout is normalized to avoid false failures from OCR line wrapping. Unreadable heading weight requires review.
 
 Any field failure makes the overall verdict `NEEDS_REVIEW`.
 
 ## Batch Processing
 
-Batch mode processes labels concurrently with a bounded concurrency limit. One bad label does not fail the whole batch; each item returns either a result or an item-level error. The summary reports approved, needs-review, error, and total counts.
+The browser accepts up to `BATCH_UPLOAD_MAX_LABELS` labels and sends them sequentially in groups of `BATCH_MAX_LABELS`. Each backend group processes labels concurrently with bounded provider concurrency. One bad label does not fail its group; the browser combines all item results into one approved, needs-review, error, and total summary. Large batches are throughput workflows and are not subject to the five-second single-label target.
 
 ## Security
 
@@ -178,6 +180,8 @@ Secret-handling audit: tracked source, examples, tests, and documentation contai
 ## Performance Notes
 
 Single-label verification has a hard target of under `5` seconds on the deployed URL. The backend provider timeout defaults to `4.5` seconds, and the frontend aborts a single-label request after `5` seconds.
+
+Railway now uses `/health/deep` for deployment readiness, and the browser calls that provider check in the background on page load. This removes avoidable first-use setup from the submit path, but a free-tier host or upstream provider can still experience infrastructure delays; performance must be remeasured after each deployment.
 
 Measure deployed single-label latency after every deploy:
 
@@ -213,6 +217,7 @@ Batch mode can take longer because several labels are processed together. Concur
 - A tested 503 x 373 composite image containing front label, back label, and bottle views produced tiny compliance text. The model read `5.3%` instead of the visible `13.5%` and classified `STORMCHASER` instead of `Chardonnay`. The application correctly surfaced these as expected-versus-found failures rather than silently approving them.
 - Higher-resolution, tightly cropped label images improve extraction. The service currently uses low image detail and JPEG preprocessing to meet the five-second latency requirement, so perfect OCR cannot be guaranteed.
 - OpenAI quota or rate limits can temporarily block live testing.
+- Deployment readiness and browser warm-up reduce cold-start risk, but free-tier infrastructure cannot guarantee every request will complete under five seconds.
 - The app does not persist history or support user accounts.
 - The app does not currently support multiple images for one label because that slowed model calls during testing.
 - This is a proof of concept, not a full TTB production workflow.
@@ -220,7 +225,7 @@ Batch mode can take longer because several labels are processed together. Concur
 ## Tradeoffs
 
 - Images are downscaled for speed and cost, which can reduce accuracy on very small text.
-- Batch concurrency improves throughput but can encounter provider rate limits.
+- Browser-side chunking supports peak upload sets without one oversized request, but processing hundreds of labels takes longer and can encounter provider rate limits.
 - Runtime configuration is exposed through `/health` only for non-secret UI limits.
 - The app is stateless, so it cannot provide history or audit persistence.
 

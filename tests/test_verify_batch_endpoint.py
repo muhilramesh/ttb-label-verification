@@ -37,6 +37,7 @@ def extracted_label(**overrides) -> ExtractedLabel:
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750ml",
         "government_warning": WARNING,
+        "government_warning_heading_bold": True,
         "raw_text": "SUNSET RIDGE\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
         "extraction_confidence": 0.96,
     }

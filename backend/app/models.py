@@ -41,6 +41,7 @@ class ExtractedLabel(BaseModel):
     abv: str | float | None = None
     net_contents: str | None = None
     government_warning: str | None = None
+    government_warning_heading_bold: bool | None = None
     raw_text: str | None = None
     extraction_confidence: float | None = None
 

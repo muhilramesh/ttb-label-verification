@@ -22,12 +22,13 @@ const batchLimit = document.querySelector("#batch-limit");
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const maxImageBytes = 8 * 1024 * 1024;
 let maxBatchLabels = 0;
+let maxBatchRequestLabels = 0;
 const requestTimeoutMs = 5000;
 const batchRequestTimeoutMs = 65000;
 const fieldDefinitions = [
   ["brand_name", "Brand Name", "input"],
   ["class_type", "Product Type", "input"],
-  ["producer", "Producer Name", "input"],
+  ["producer", "Producer / Bottler Name and Address", "input"],
   ["country_of_origin", "Country of Origin", "input"],
   ["abv", "Alcohol Content, like 45%", "input"],
   ["net_contents", "Net Contents, like 750 mL", "input"],
@@ -270,51 +271,67 @@ batchForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const formData = new FormData();
   const rows = batchRows.slice();
+  resultPanel.hidden = true;
+  resultPanel.innerHTML = "";
+  setBatchLoading(true, rows.length);
+  const started = performance.now();
+  renderBatchProgress(rows.length, 0);
+
+  try {
+    const combined = {
+      items: [],
+      summary: { passed: 0, needs_review: 0, errors: 0, total: rows.length, latency_ms: 0 },
+    };
+    for (let offset = 0; offset < rows.length; offset += maxBatchRequestLabels) {
+      const chunk = rows.slice(offset, offset + maxBatchRequestLabels);
+      const data = await checkBatchChunk(chunk);
+      combined.items.push(...(data.items || []));
+      combined.summary.passed += data.summary?.passed || 0;
+      combined.summary.needs_review += data.summary?.needs_review || 0;
+      combined.summary.errors += data.summary?.errors || 0;
+      renderBatchProgress(rows.length, combined.items.length);
+    }
+    combined.summary.latency_ms = Math.round(performance.now() - started);
+    renderBatchResults(combined);
+    setBatchFormMessage("");
+  } catch (error) {
+    if (error.name === "AbortError") {
+      renderError("One group took too long to finish. Try again with clearer images.");
+    } else {
+      renderError(error.message || "The batch could not be checked. Please try again.");
+    }
+  } finally {
+    setBatchLoading(false, rows.length);
+    updateBatchFormState();
+  }
+});
+
+async function checkBatchChunk(rows) {
+  const formData = new FormData();
   formData.append("application_data", JSON.stringify(rows.map((row) => batchRowData(row.id))));
   formData.append("image_ids", JSON.stringify(rows.map((row) => row.id)));
   for (const row of rows) {
     formData.append("images", row.file, row.file.name);
   }
 
-  resultPanel.hidden = true;
-  resultPanel.innerHTML = "";
-  setBatchLoading(true, rows.length);
-
-  let progressTimer = setTimeout(() => renderBatchProgress(rows.length), 700);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), batchRequestTimeoutMs);
-
   try {
     const response = await fetch("/verify/batch", {
       method: "POST",
       body: formData,
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
-    clearTimeout(progressTimer);
-
     const data = await response.json();
     if (!response.ok) {
       throw new Error(readableError(data));
     }
-
-    renderBatchResults(data);
-    setBatchFormMessage("");
-  } catch (error) {
-    clearTimeout(progressTimer);
-    if (error.name === "AbortError") {
-      renderError("The batch took too long to finish. Try fewer or clearer images.");
-    } else {
-      renderError(error.message || "The batch could not be checked. Please try again.");
-    }
+    return data;
   } finally {
     clearTimeout(timeoutId);
-    setBatchLoading(false, rows.length);
-    updateBatchFormState();
   }
-});
+}
 
 function renderBatchRows() {
   batchRowsSection.hidden = batchRows.length === 0;
@@ -331,7 +348,7 @@ function renderBatchRows() {
         </div>
         <button class="secondary-button" type="button" data-remove-row="${escapeHtml(row.id)}">Remove</button>
       </div>
-      ${row.previewUrl ? `<img class="batch-preview" src="${row.previewUrl}" alt="Selected label preview" />` : ""}
+      ${row.previewUrl ? `<img class="batch-preview" src="${row.previewUrl}" alt="Selected label preview" loading="lazy" decoding="async" />` : ""}
       <div class="field-grid">
         ${fieldDefinitions.map(([name, label, type]) => renderBatchInput(row.id, name, label, type)).join("")}
       </div>
@@ -468,9 +485,15 @@ fetch("/health")
   .then((response) => response.ok ? response.json() : null)
   .then((config) => {
     if (config && Number.isInteger(config.batch_max_labels)) {
-      maxBatchLabels = config.batch_max_labels;
+      maxBatchRequestLabels = config.batch_max_labels;
+      maxBatchLabels = Number.isInteger(config.batch_upload_max_labels)
+        ? config.batch_upload_max_labels
+        : config.batch_max_labels;
       batchLimit.textContent = String(maxBatchLabels);
       updateBatchFormState();
     }
   })
   .catch(() => setBatchFormMessage("Could not load the batch limit. Refresh the page.", true));
+
+// Exercise the provider path while the user prepares the form, reducing first-submit cold starts.
+fetch("/health/deep", { cache: "no-store" }).catch(() => {});

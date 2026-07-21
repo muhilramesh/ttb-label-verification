@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.api import router as api_router
-from backend.app.config import batch_max_labels
+from backend.app.config import batch_max_labels, batch_upload_max_labels
 from backend.app.vision import (
     DEFAULT_VISION_MODEL,
     OPENAI_MODEL_ENV,
@@ -42,6 +42,7 @@ def health() -> dict[str, str | int]:
         "service": "ttb-label-verification",
         "environment": os.getenv("APP_ENV", "local"),
         "batch_max_labels": batch_max_labels(),
+        "batch_upload_max_labels": batch_upload_max_labels(),
     }
 
 

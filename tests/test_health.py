@@ -16,6 +16,7 @@ def test_health_returns_ok() -> None:
         "service": "ttb-label-verification",
         "environment": "local",
         "batch_max_labels": 10,
+        "batch_upload_max_labels": 300,
     }
 
 
@@ -26,6 +27,15 @@ def test_health_returns_configured_batch_limit(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["batch_max_labels"] == 6
+
+
+def test_health_returns_configured_batch_upload_limit(monkeypatch) -> None:
+    monkeypatch.setenv("BATCH_UPLOAD_MAX_LABELS", "240")
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["batch_upload_max_labels"] == 240
 
 
 def test_root_serves_frontend() -> None:

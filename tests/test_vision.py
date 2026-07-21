@@ -30,7 +30,7 @@ def image_bytes(size: tuple[int, int] = (800, 600)) -> bytes:
     return output.getvalue()
 
 
-def extracted_payload(**overrides) -> dict[str, str | float | None]:
+def extracted_payload(**overrides) -> dict[str, str | float | bool | None]:
     payload = {
         "brand_name": "Sunset Ridge",
         "class_type": "Cabernet Sauvignon",
@@ -39,6 +39,7 @@ def extracted_payload(**overrides) -> dict[str, str | float | None]:
         "abv": "45% Alc./Vol. (90 Proof)",
         "net_contents": "750 mL",
         "government_warning": WARNING,
+        "government_warning_heading_bold": True,
         "raw_text": "Sunset Ridge\nGOVERNMENT WARNING: EXACTLY AS PRINTED",
         "extraction_confidence": 0.94,
     }
@@ -165,6 +166,9 @@ def test_openai_service_uses_strict_schema_and_low_detail_image() -> None:
     assert schema["additionalProperties"] is False
     assert schema["required"] == list(EXTRACTED_LABEL_FIELDS)
     assert schema["properties"]["raw_text"] == {"type": ["string", "null"]}
+    assert schema["properties"]["government_warning_heading_bold"] == {
+        "type": ["boolean", "null"]
+    }
     assert schema["properties"]["extraction_confidence"] == {
         "type": ["number", "null"],
         "minimum": 0,
@@ -177,6 +181,8 @@ def test_openai_service_uses_strict_schema_and_low_detail_image() -> None:
     assert "raw_text" in prompt
     assert "extraction_confidence" in prompt
     assert "character-for-character" in prompt
+    assert "complete visible producer/bottler name and address" in prompt
+    assert "government_warning_heading_bold" in prompt
     assert "Do not complete it from memory." in prompt
 
     image_part = request_body["input"][0]["content"][1]
@@ -308,7 +314,7 @@ def test_model_smoke_check_uses_configured_model() -> None:
     }
 
 
-def openai_response(payload: dict[str, str | float | None]) -> dict:
+def openai_response(payload: dict[str, str | float | bool | None]) -> dict:
     return openai_text_response(json.dumps(payload))
 
 
