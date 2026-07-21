@@ -179,7 +179,7 @@ Secret-handling audit: tracked source, examples, tests, and documentation contai
 
 ## Performance Notes
 
-Single-label verification has a hard target of under `5` seconds on the deployed URL. The backend provider timeout defaults to `4.5` seconds, and the frontend aborts a single-label request after `5` seconds.
+Single-label verification has a hard target of under `5` seconds on the deployed URL. The backend provider timeout defaults to `4.5` seconds. The frontend shows a delayed status message after `5` seconds and keeps the request open for up to `8` seconds to accommodate hosting cold-start and network overhead.
 
 Railway now uses `/health/deep` for deployment readiness, and the browser calls that provider check in the background on page load. This removes avoidable first-use setup from the submit path, but a free-tier host or upstream provider can still experience infrastructure delays; performance must be remeasured after each deployment.
 

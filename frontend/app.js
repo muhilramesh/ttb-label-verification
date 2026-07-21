@@ -23,7 +23,8 @@ const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/he
 const maxImageBytes = 8 * 1024 * 1024;
 let maxBatchLabels = 0;
 let maxBatchRequestLabels = 0;
-const requestTimeoutMs = 5000;
+const slowMessageDelayMs = 5000;
+const requestTimeoutMs = 8000;
 const batchRequestTimeoutMs = 65000;
 const fieldDefinitions = [
   ["brand_name", "Brand Name", "input"],
@@ -203,7 +204,7 @@ form.addEventListener("submit", async (event) => {
   setLoading(true);
   const coldStartTimer = setTimeout(() => {
     setFormMessage("Still reading. The free-tier service may be starting up...", false, true);
-  }, 2000);
+  }, slowMessageDelayMs);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
 
